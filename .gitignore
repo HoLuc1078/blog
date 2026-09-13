@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.vs/
+blog.db
+.secret_key
+dev_mail.log
+static/uploads/*
+_ref_*.html
+_ref_*.css
+_ref_*.txt

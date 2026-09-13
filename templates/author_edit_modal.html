@@ -1,0 +1,61 @@
+<div class="modal-mask" id="authorEditModal" hidden>
+  <div class="modal glass" role="dialog" aria-modal="true" aria-label="编辑作者栏">
+    <h3>编辑作者栏 / 站点</h3>
+
+    <div class="form-grid">
+      <div class="form-col">
+        <h4>博主资料</h4>
+        <label>昵称
+          <input type="text" id="aeNickname" maxlength="30" value="{{ site.author_nickname }}">
+        </label>
+        <label>头像
+          <div class="avatar-row">
+            {% if site.author_avatar %}
+            <img id="aeAvatarPreview" class="ae-avatar" alt="" src="{{ site.author_avatar }}">
+            {% else %}
+            <img id="aeAvatarPreview" class="ae-avatar" alt="" hidden>
+            {% endif %}
+            <div class="avatar-inputs">
+              <label class="btn small ghost file-btn" style="width:100%">
+                上传<input type="file" id="aeAvatarFile" accept=".png,.jpg,.jpeg,.gif,.webp" hidden>
+              </label>
+            </div>
+          </div>
+        </label>
+        <label>简介
+          <textarea id="aeBio" rows="5" maxlength="2000">{{ site.author_bio }}</textarea>
+        </label>
+      </div>
+
+      <div class="form-col">
+        <h4>站点标题</h4>
+        <label>主标题
+          <input type="text" id="aeSiteTitle" maxlength="40" value="{{ site.site_title }}">
+        </label>
+        <label>副标题
+          <input type="text" id="aeSiteSubtitle" maxlength="80" value="{{ site.site_subtitle }}">
+        </label>
+        <label>页脚
+          <input type="text" id="aeFooterText" maxlength="200" value="{{ site.footer_text }}">
+        </label>
+
+        <h4>Links · 链接</h4>
+        <div id="aeLinks" class="ae-links">
+          {% for l in site.author_links %}
+          <div class="ae-link-row">
+            <input type="text" class="ae-link-label" maxlength="30" placeholder="名称" value="{{ l.label }}">
+            <input type="text" class="ae-link-url" maxlength="2000" placeholder="网址" value="{{ l.url }}">
+            <button type="button" class="ae-link-del" title="移除" aria-label="移除"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close" xlink:href="#icon-close"></use></svg></button>
+          </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="btn small ghost" id="aeAddLink">＋ 添加链接</button>
+      </div>
+    </div>
+
+    <div class="modal-actions row">
+      <button type="button" class="btn ghost" id="aeCancel">取消</button>
+      <button type="button" class="btn btn-primary" id="aeSave">保存</button>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title }} · {{ site.site_title }}{% endblock %}
+{% block content %}
+<div class="layout">
+  <main class="main-col">
+    <a class="back-link dim" href="/">‹ 返回首页</a>
+
+    <article class="glass art-card">
+      <header class="art-head">
+        <h1 class="art-title">
+          <svg class="icon post-icon" aria-hidden="true" focusable="false"><use href="#{{ post_icon(post) }}" xlink:href="#{{ post_icon(post) }}"></use></svg>
+          <span>{{ post.title }}</span>
+        </h1>
+        <div class="art-meta dim">
+          {% if post.draft %}<span class="draft-badge">草稿</span>{% endif %}
+          {% if post.pin %}<span class="pin-badge">置顶{% if can_edit %}<b>{{ post.pin }}</b>{% endif %}</span>{% endif %}
+          {% for t in post.tags %}
+          <a class="cat-tag" href="/?tag={{ t | urlencode }}">{{ t }}</a>
+          {% endfor %}
+          {% for f in post.flags %}
+          <span class="flag-tag flag-{{ f.key }}">{{ f.label }}</span>
+          {% endfor %}
+          <span class="meta-item">发布于 {{ post.created }}</span>
+          <span class="meta-item">阅读 {{ post.views }}</span>
+          {% if can_edit %}
+          <span class="art-actions">
+            <a class="btn tiny" href="/a/{{ post.id }}/edit">编辑</a>
+            <form method="post" action="/a/{{ post.id }}/delete" class="inline-form"
+                  data-confirm="确定删除这篇文章吗？此操作不可恢复。">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <button class="btn tiny danger" type="submit">删除</button>
+            </form>
+          </span>
+          {% endif %}
+        </div>
+      </header>
+
+      {% if post.summary %}
+      <div class="art-summary">{{ post.summary | md | safe }}</div>
+      {% endif %}
+
+      <div class="md-body art-body">{{ body_html | safe }}</div>
+
+      <footer class="art-tail">
+        <a class="btn ghost" href="#comments">评论 {{ cmt_total }} 条 ↧</a>
+      </footer>
+    </article>
+
+    <section class="glass cmt-card" id="comments">
+      <h2 class="panel-title">评论</h2>
+
+      <form method="post" action="/a/{{ post.id }}/comment" class="cmt-form" id="cmtForm">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="parent_id" id="cmtParent" value="{{ cmt_parent or 0 }}">
+        {% if cerr %}
+        <div class="cmt-err">
+          {% if cerr == 'captcha' %}验证码不正确
+          {% elif cerr == 'name' %}名字不合法
+          {% elif cerr == 'content' %}评论内容为空
+          {% elif cerr == 'slow' %}发言太快，稍后再试
+          {% else %}提交过于频繁{% endif %}
+        </div>
+        {% endif %}
+        <div class="cmt-reply-to" id="cmtReplyTo" hidden>
+          回复 <b id="cmtReplyName"></b>
+          <button type="button" class="mini-del" id="cmtReplyCancel">取消</button>
+        </div>
+        <div class="cmt-top">
+          <input type="text" name="name" class="cmt-name" maxlength="20" required
+                 placeholder="名字" value="{{ cmt_name }}" autocomplete="nickname">
+          <input type="text" name="captcha" class="cmt-captcha" maxlength="6" required
+                 placeholder="验证码" autocomplete="off" spellcheck="false">
+          <img class="captcha-img" id="captchaImg" src="/captcha.png" alt="图形验证码"
+               title="换一张">
+        </div>
+        <textarea name="content" rows="3" maxlength="5000" required placeholder="评论"></textarea>
+        <div class="cmt-actions">
+          <button class="btn btn-primary" type="submit" id="cmtSubmit">发表评论</button>
+        </div>
+      </form>
+
+      <div class="cmt-list">
+        {% for c in comments %}
+        <div class="cmt-item" id="c{{ c.id }}">
+          <div class="cmt-body">
+            <div class="cmt-head">
+              <b>{{ c.name }}</b>
+              <span class="dim small">{{ c.created }}</span>
+              <button type="button" class="cmt-reply" data-cid="{{ c.id }}" data-name="{{ c.name }}">回复</button>
+              {% if can_edit %}
+              <form method="post" action="/a/{{ post.id }}/comment/{{ c.id }}/delete"
+                    class="inline-form" data-confirm="删除这条评论？它下面的回复会一起删掉。">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                <button class="mini-del" type="submit">删除</button>
+              </form>
+              {% endif %}
+            </div>
+            <div class="md-mini md-body cmt-content">{{ c.content | md | safe }}</div>
+
+            {% if c.replies %}
+            <div class="cmt-replies">
+              {% for r in c.replies %}
+              <div class="cmt-item cmt-sub" id="c{{ r.id }}">
+                <div class="cmt-body">
+                  <div class="cmt-head">
+                    <b>{{ r.name }}</b>
+                    {% if r.reply_to %}<span class="reply-to">回复 @{{ r.reply_to }}</span>{% endif %}
+                    <span class="dim small">{{ r.created }}</span>
+                    <button type="button" class="cmt-reply" data-cid="{{ r.id }}" data-name="{{ r.name }}">回复</button>
+                    {% if can_edit %}
+                    <form method="post" action="/a/{{ post.id }}/comment/{{ r.id }}/delete"
+                          class="inline-form" data-confirm="删除这条评论？它下面的回复会一起删掉。">
+                      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                      <button class="mini-del" type="submit">删除</button>
+                    </form>
+                    {% endif %}
+                  </div>
+                  <div class="md-mini md-body cmt-content">{{ r.content | md | safe }}</div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% else %}
+        <p class="dim small" style="padding: 8px 2px">还没有评论，来抢沙发～</p>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+
+  {% include "author_col.html" %}
+</div>
+{% endblock %}

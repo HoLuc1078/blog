@@ -1,0 +1,78 @@
+<aside class="author-col">
+  <div class="author-card">
+    <div class="author-sticky">
+      <div class="author-head">
+        {% if site.author_avatar %}
+        <img class="author-avatar" src="{{ site.author_avatar }}" alt="博主头像"
+             referrerpolicy="no-referrer">
+        {% else %}
+        <span class="author-avatar avatar-empty" aria-hidden="true">{{ site.author_nickname[:1] }}</span>
+        {% endif %}
+        <div class="author-id">
+          <div class="author-name">
+            {{ site.author_nickname }}
+          </div>
+          <div class="author-motto">{{ site.site_subtitle }}</div>
+        </div>
+      </div>
+
+      {% if site.author_bio %}
+      <div class="author-bio md-mini md-body">{{ site.author_bio | md | safe }}</div>
+      {% endif %}
+
+      <div class="author-stats">
+        <div class="stat-cell"><b>{{ stats.articles }}</b><span>文章</span></div>
+        <div class="stat-cell"><b>{{ stats.comments }}</b><span>评论</span></div>
+        <div class="stat-cell"><b>{{ stats.views }}</b><span>阅读</span></div>
+      </div>
+
+      {% if site.author_links %}
+      <div class="link-sec">
+        <div class="link-title">Links · 链接</div>
+        <ul class="author-links">
+          {% for l in site.author_links %}
+          <li>
+            <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">
+              <span class="dot" aria-hidden="true"></span>{{ l.label }}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if all_tags %}
+      <div class="link-sec">
+        <div class="link-title">标签 · Tags</div>
+        <ul class="author-links cat-links">
+          {% for t in all_tags %}
+          <li><a href="/?tag={{ t.name | urlencode }}">
+            <span class="dot" aria-hidden="true"></span>{{ t.name }}<span class="cat-n">{{ t.n }}</span>
+          </a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if recent_posts %}
+      <div class="link-sec">
+        <div class="link-title">Recent · 最近文章</div>
+        <ul class="author-links recent-links">
+          {% for p in recent_posts %}
+          <li><a href="/a/{{ p.id }}"><span class="dot" aria-hidden="true"></span>{{ p.title }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if is_owner %}
+      <button class="btn ghost edit-author-btn" type="button" id="editAuthorBtn">编辑作者栏</button>
+      {% endif %}
+    </div>
+
+    <div class="author-foot">
+      {% if site.footer_text %}<div>{{ site.footer_text }}</div>{% endif %}
+      <div class="dim small">© {{ site.author_nickname }} · {{ site.site_title }}</div>
+    </div>
+  </div>
+</aside>

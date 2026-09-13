@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ '编辑文章' if post and post.id else '写文章' }} · {{ site.site_title }}</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<script>(function(){try{var d=document.documentElement;var t=localStorage.getItem("petal.theme")||"light";if(t!=="light"&&t!=="care"&&t!=="dark")t="light";d.setAttribute("data-theme",t);var c=parseInt(localStorage.getItem("petal.care")||"52",10);if(!(c>=10&&c<=85))c=52;d.style.setProperty("--care-strength",(c/100).toFixed(2));}catch(e){document.documentElement.setAttribute("data-theme","light");}})();</script>
+<link rel="stylesheet" href="/static/css/style.css">
+<style>{{ theme_css() }}</style>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+</head>
+<body class="editor-page" data-aid="{% if post %}{{ post.id }}{% endif %}"
+      data-status="{{ post.status if post else '' }}">
+<div class="bg" aria-hidden="true"></div>
+<div class="theme-tint" aria-hidden="true"></div>
+{% include "icons.html" %}
+
+<div class="editor-root">
+  {% if error %}
+  <div class="ed-error">{{ error }}</div>
+  {% endif %}
+  <!-- 顶栏：返回 / 标题（发布与存草稿放在右侧设置栏） -->
+  <header class="editor-top">
+    <a class="back-link" href="/">&lt; 返回</a>
+    <input type="text" class="ed-title" id="edTitle" maxlength="120" placeholder="标题"
+           value="{{ post.title if post else '' }}" autocomplete="off">
+    <div class="ed-top-right">
+      <span class="draft-badge" id="edDraftBadge"{% if not (post and post.status == 'draft') %} hidden{% endif %}>草稿</span>
+      <span class="dim small draft-state" id="draftState"></span>
+    </div>
+  </header>
+
+  <div class="editor-split">
+    <!-- 主编辑区：markdown 源码 / 预览 双标签 -->
+    <section class="ed-main">
+      <div class="ed-tabs">
+        <button type="button" class="tab-btn active" data-tab="edit">编辑</button>
+        <button type="button" class="tab-btn" data-tab="preview">预览</button>
+      </div>
+
+      <textarea id="edContent" class="ed-content" spellcheck="false"
+                placeholder="正文">{% if post %}{{ post.content_md }}{% endif %}</textarea>
+
+      <div class="ed-preview md-body" id="edPreview" hidden></div>
+
+      <div class="ed-statusbar dim">
+        <span id="edCount">0 字 · 0 行</span>
+      </div>
+    </section>
+
+    <!-- 右侧 sidebar-container（参考洛谷文章编辑页的文章设置栏） -->
+    <aside class="sidebar-container">
+      <div class="glass side-card">
+        <h4 class="side-title">摘要</h4>
+        <textarea id="edSummary" class="side-textarea" rows="4" maxlength="300">{% if post %}{{ post.summary }}{% endif %}</textarea>
+      </div>
+
+      <div class="glass side-card">
+        <h4 class="side-title">标签</h4>
+        <div class="tag-edit">
+          <div class="tag-edit-list" id="edTagList"></div>
+          <div class="tag-edit-input">
+            <input type="text" id="edTagInput" maxlength="20" list="edTagOptions"
+                   placeholder="新标签" autocomplete="off">
+            <button class="btn ghost small" type="button" id="edTagAdd">添加</button>
+          </div>
+          <datalist id="edTagOptions">
+            {% for t in all_tags %}<option value="{{ t.name }}"></option>{% endfor %}
+          </datalist>
+          <input type="hidden" id="edTags" value="{{ post.tags if post else '' }}">
+        </div>
+
+        <h4 class="side-title">图标</h4>
+        <div class="icon-picks" id="edIconPicks">
+          {% for ic in POST_ICONS %}
+          <button type="button" class="icon-pick" data-icon="{{ ic }}" aria-label="{{ ic }}">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="#{{ ic }}" xlink:href="#{{ ic }}"></use></svg>
+          </button>
+          {% endfor %}
+        </div>
+        <input type="hidden" id="edIcon"
+               value="{{ post_icon(post) if post else POST_ICONS[0] }}">
+
+        <h4 class="side-title">置顶量</h4>
+        <input type="number" id="edPin" min="0" max="999" step="1"
+               value="{{ (post.pin if post else 0) or 0 }}">
+
+        <h4 class="side-title">发布时间</h4>
+        <input type="datetime-local" id="edCreated"
+               value="{{ input_dt(post.created_at if post else None) }}">
+
+        <h4 class="side-title">过滤标记</h4>
+        <div class="flag-picks">
+          {% for key, label in FLAGS %}
+          <label class="chk"><input type="checkbox" class="ed-flag" value="{{ key }}"
+            {% if post and key in (post.flags or '').split(',') %}checked{% endif %}><span>{{ label }}</span></label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="glass side-card">
+        <h4 class="side-title">发布</h4>
+        <button class="btn btn-primary big side-publish" type="button" id="edPublish2">发布 / 更新</button>
+        <button class="btn ghost full-btn" type="button" id="edSave2">存草稿</button>
+        {% if post and post.id %}
+        <form method="post" action="/a/{{ post.id }}/delete" data-confirm="确定删除这篇文章吗？">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <button class="btn danger full-btn" type="submit">删除这篇文章</button>
+        </form>
+        {% endif %}
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+<script src="/static/js/editor.js"></script>
+</body>
+</html>

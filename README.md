@@ -1,0 +1,104 @@
+# 樱羽小筑 · Petal Blog
+
+毛玻璃 + 樱花粉的个人博客。Markdown / LaTeX 渲染语义参考洛谷，发布页参考洛谷文章编辑器布局。
+
+## 运行
+
+```bash
+pip install -r requirements.txt   # Flask / Markdown / Pillow
+python app.py                     # 监听 0.0.0.0:8848
+```
+
+打开 http://127.0.0.1:8848
+
+> 端口可用环境变量覆盖：`PORT=9000 python app.py`
+> 背景图重新生成：`python gen_bg.py`（写 `static/bg.jpg`）
+
+## 使用方式（无账号系统）
+
+- **浏览**：任何人可看文章、标签、评论。
+- **评论**：不用登录，填「名字 + 噪点图形验证码」即可（验证码点图片可换一张，
+  5 分钟有效、一次一用；同一浏览器两次评论间隔 15 秒，同 IP 10 分钟最多 20 条）。
+- **站长发文**：浏览器直接打开 **`/admin`**（页面上不放入口）设置**站长口令**（首次设置，≥6 位）。
+  解锁后顶栏出现「写文章」，作者栏出现「编辑作者栏」；解锁状态保存在本机浏览器（30 天），
+  随时可在 `/admin` 锁定。口令只存在本机 `blog.db` 的 `site_cfg.owner_pass_hash`（哈希），
+  忘记时清掉该行即可重设。
+
+## 需求对照
+
+| 需求 | 实现 |
+| --- | --- |
+| 毛玻璃 UI（仿 yingaobichibang） | `static/css/style.css`：浅色玻璃面板 + 淡粉渐变标题，可爱风（淡粉 + 白） |
+| 主体色 | 默认手写可爱配色：`--accent:#f0a6c0` / `--accent-deep:#cf7a9b`（降饱和的淡粉，不刺眼）+ 白色面板；实心色块 `--solid-side:#fbe7f0` 等。想让主色跟着 `static/bg.jpg` 自动提取（`theme.py`），启动时设 `THEME_FROM_BG=1` 即可 |
+| main-col 透明度 | `.main-col { opacity: .75 }`（主栏整体 75% 不透明） |
+| topbar 最左侧站点图标 | `.brand` 内 `<img class="site-logo" src="/static/favicon.svg">`（用原来的粉色图标，未做任何改动/滤镜）；顶栏为**纯色**白底（`--topbar-bg:#ffffff`，不做毛玻璃） |
+| 发布时间可自己填 | 编辑页「发布时间」（`datetime-local`，按北京时间填）→ 存库转 UTC；留空＝当前时间，非法值报错；列表按 `pin DESC, created_at DESC` 排序 |
+| 发布页深色玻璃、少圆角 | `.ed-main` / `.side-card` / `.editor-top`：深色玻璃 `rgba(78,56,72,.52) → rgba(56,40,53,.63)` + `blur(24px) saturate(150%)`，内部文字/控件/预览区整套改成浅色（`--ed-ink` / `--ed-field` / `--ed-line`）；编辑页所有面板与控件 `border-radius: 0` |
+| 文案精简 | 全站去掉「（如：…）」「越大越靠前」「留空则…」等说明性文字，只保留标签、按钮与必要的错误提示 |
+| 站长标识 | 已去掉作者栏昵称旁的「博」标签（`.owner-tag`） |
+| 主页面 : 作者页 = 3:1 | `.main-col{flex:3}` / `.author-col{flex:1}`（作者栏另有 286px 固定宽度上限，屏幕窄时降到 248px） |
+| 作者栏纯色实心、无圆角、固定高度不随页面滚动 | `.author-card`：纯色 `--solid-side`、无毛玻璃、无圆角、无阴影；`position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h) - 16px)` —— 固定高度吸顶，只有内部 `.author-links`（Links / 分类 / 最近文章三个列表）各自 `overflow-y: auto` 独立滚动 |
+| main-split 尽量占满页面 | `.layout` 最大宽 1720、左右 10px 留白、底部无空隙 |
+| 花瓣粒子（美化版） | `static/js/petals.js`：**纯 JS 文件**（由 `<script src>` 加载，整页 HTML 不能贴进来，否则浏览器按 JS 解析会直接语法错误、粒子整层不执行）。`COUNT`：桌面 1300 / 窄屏 700；z 景深（近大远小）、残影拖尾（`destination-out` 淡出，保留页面背景、暗色下不留白底）、鼠标力场吸附。改密度只改 `COUNT`。绘制全是「纯色路径填充」一条管线——小花瓣 `arc` 圆点、大花瓣（约 1/8）带旋转的压扁 `ellipse`；颜色按块分组，`fillStyle` 每帧只改一百多次；画布半分辨率渲染后由 CSS 拉伸铺满视口。鼠标附近为力场式吸附（边界平滑归零 + 近处轻推成环 + 切向分量绕转），不会在影响半径上来回抖 |
+| 文章点得开 | 整张卡片（含标题、摘要、留白）都是进入文章的点击区（`static/css/style.css` 的 `.post-title::after`） |
+| 标题与正文用虚线分割 | 列表卡 `.post-head` 与文章页 `.art-title` / `.art-meta` 均为 `1px dashed` |
+| 列表摘要更小更淡 | `.post-excerpt` 12.5px、62% 透明，与标题拉开层次 |
+| 最新文章不同样式 + 纯色填充 + 与每篇宽度不同 | `.latest-board` 纯色板 + 实心标题条占满主栏；每篇 `.post-card` 纯色且窄 14px，左侧留白仅 4px |
+| 标题前的 svg 图标 | `templates/icons.html` 内联 sprite：`#icon-lizi`、`#icon-peach`、`#icon-sakura`、`#icon-rainbow`、`#icon-clover`，编辑页「图标」里自选（`articles.icon`）；没选过的老文章按 id 稳定分配（`post_icon()` 兜底）。用法与 cnblogs 一致：`<svg class="icon"><use href="#icon-lizi"></use></svg>` |
+| 减少圆角 | 大面板一律直角（0），按钮 3px、输入 2px |
+| 评论改成名字 + 图形验证码（无头像） | `/captcha.png`（Pillow 生成：噪点 + 干扰线 + 字符随机旋转）、`/a/<id>/comment` 校验；失败带 `?cerr=` 回评论区给出具体提示；评论不显示头像 |
+| 取消登录/注册 | 删掉了注册、登录、邮箱验证码、个人主页、账号管理；发文改为 `/admin` 站长口令 |
+| 头像只留一张、上传即覆盖 | `static/avatar.png` 固定文件：上传时方形裁剪 + 缩放到 256 后直接覆盖，不写数据库、不保留旧文件（老上传目录里的头像会自动搬过来）；没有头像时作者栏用昵称首字占位（已删除默认头像图） |
+| 作者栏竖排链接、站长可编辑 | 作者栏 Links 竖排；「编辑作者栏」可增删改链接（GitHub/Bilibili/邮箱…，可省 `https://`，自动补全）；也可改昵称/简介/头像/站点标题/页脚 |
+| 护眼滤镜 / 暗黑模式 | 顶栏三档切换「浅色 / 护眼 / 暗黑」：护眼是整屏暖色 `multiply` 叠层（压蓝光、不改布局），切到护眼时顶栏出现强度滑块（10%~85%，存 `localStorage` 的 `petal.care`）；暗黑参考 cnblogs `/yc-lain` 的暗黑色系、整套 CSS 变量互换（bg `#171e23`、面板 `#1b2329`、正文 `#c6d0d7`，玻璃面板走 `--glass-hi/--glass-lo`）。选择存 `localStorage`，`<head>` 内联脚本首屏即生效、无白闪；文章页与发布页一样跟随 |
+| 文章标签（= 文章分类，可多个） | 编辑页「标签（可多个）」：输入回车/逗号即添加，带已有标签提示，一篇可打多个（`articles.tags` 存 CSV，最多 12 个 × 20 字）；首页卡片、文章页、草稿箱显示标签并可点进筛选；作者栏「标签 · Tags」列表（含篇数） |
+| 置顶量 | 编辑页「置顶量」0~999，越大越靠前（`ORDER BY pin DESC, created_at DESC`），列表与文章页显示置顶标记 |
+| 三个内容过滤标记 | 编辑页侧栏「内容过滤标记」三个选框：**不安全 / 负能量 / 非学术**（可多选，`articles.flags` 存 CSV），首页卡片与文章页以彩色小标签显示；它们只是内容提示，不是文章分类 |
+| 首页过滤 + 按标签筛选 | 「过滤」三个复选框（不显示不安全/负能量/非学术内容）+「标签」按钮（= 文章分类，多选，命中任一即显示，带篇数）+「重置」；选择记在 `localStorage`，刷新后仍在；`/?tag=xxx` 会把它设为初始选中标签 |
+| 过滤/标签/翻页不发请求 | 首页一次性把已发布文章全渲染出来，`static/js/index.js` 在前端完成过滤、按标签筛选、翻页与每页篇数（`fetch`/`XHR` 零调用，实测 0 次） |
+| 翻页在最下面 + 每页篇数 | `.list-foot` 在列表底部：上一页 / 页码 / 下一页 + 「每页 6 / 12 / 24 / 48 / 全部 篇」 |
+| 存草稿 | 编辑页顶部与侧栏各一个「存草稿」按钮（`status=draft`）；草稿允许先只写标题；草稿状态在编辑页显示紫色「草稿」小标 |
+| 草稿只有站长看得到 | 首页/分类/作者栏统计/最近文章一律只算 `status='published'`；游客直接开草稿链接也是 404 |
+| 草稿箱 | 顶栏右侧**粉色文本超链接**「草稿箱」（仅站长可见，不是按钮），带未发布篇数角标；`/drafts` 里可继续编辑 / 发布 / 删除 |
+| 评论可以回复、回复的回复 | `comments.parent_id`；回复统一挂在顶层线程下，回复回复会标「回复 @某人」；右上角「回复」把主表单切到回复模式（共用同一张验证码，不额外发请求）；删除评论会连带删除其下所有回复 |
+| 端口 8848 | 见上 |
+
+## 内容能力
+
+- **Markdown + LaTeX**：`$..$`、`$$..$$`、`\(..\)`、`\[..\]`，可嵌在粗体/标题/列表/引用中；
+  代码块里的 `$` 不算公式；公式由前端 KaTeX 渲染（走 jsdelivr CDN，需联网）。
+- **洛谷容器**：`:::info`、`:::warning[标题]`、`:::success`、`:::error`、`:::tip` 等，
+  可嵌套，内部照常渲染 Markdown/公式/代码/表格。
+- 安全：内容经 HTML 白名单净化（XSS）、SQL 参数化、会话签名、CSRF 令牌、
+  上传图片做文件头魔数校验、口令尝试限流。
+
+## 目录
+
+```
+app.py              Flask 后端（路由 / 站长口令 / 验证码 / 内容 API / 数据库迁移）
+theme.py            从 static/bg.jpg 提取主体色，生成 CSS 变量
+md_math.py          Markdown + LaTeX 保护式渲染 + HTML 白名单净化
+gen_bg.py           生成 static/bg.jpg
+requirements.txt
+templates/          base / index / article / editor / drafts / admin / author_col / icons / modal / error
+static/
+  css/style.css     全站样式（主体色由 theme.py 注入覆盖）
+  js/petals.js      花瓣粒子（纯 JS，禁止放 HTML；颜色跟随主体色）
+  js/index.js       首页前端筛选 / 标签 / 翻页 / 每页篇数（零请求）
+  js/app.js         toast / CSRF / KaTeX / 代码复制 / 验证码刷新 / 作者栏编辑 / 评论回复
+  js/editor.js      发布页逻辑（摘要、标签、置顶量、发布时间、内容过滤标记、存草稿、发布）
+  bg.jpg  favicon.svg  sakura.svg（空状态樱花）  note.svg（草稿箱空状态）  avatar.png（运行时生成）
+blog.db             运行时自动生成（SQLite，老库自动迁移补列）
+```
+
+## 迁移说明
+
+- 老库（带账号系统）升级时：`comments` 会自动加上 `author_name` 并用原用户名回填，
+  旧评论一条不丢；`users` 表原样保留（不再使用），`email_codes`、`favorites` 已删除，
+  `site_cfg.author_avatar` 已清理。
+- 新增列都会自动补上：`articles.status`（默认 `published`）、`articles.flags`（默认空）、
+  `articles.icon`（默认空，空 = 按 id 自动分配图标）、
+  `articles.tags`（默认空，老库的单个 `articles.category` 会自动搬进 `tags`，内容不丢；
+  旧 `category` 列保留但不再读写）、`comments.parent_id`（默认 0，即顶层评论），老数据不受影响。
+- 老的头像（`static/uploads/xxx.png`）会自动转换搬成 `static/avatar.png`，不会丢。
+- 站长口令存在 `site_cfg.owner_pass_hash`，忘记时 `DELETE FROM site_cfg WHERE key='owner_pass_hash'` 即可重设。

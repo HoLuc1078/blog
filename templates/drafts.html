@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}草稿箱 · {{ site.site_title }}{% endblock %}
+{% block content %}
+<div class="layout">
+  <main class="main-col">
+    <a class="back-link dim" href="/">‹ 返回首页</a>
+
+    <section class="latest-board">
+      <header class="latest-head">
+        <h2 class="latest-title">草稿箱</h2>
+        <span class="latest-sub">{{ drafts | length }} 篇</span>
+      </header>
+
+      <div class="post-list">
+        {% for p in drafts %}
+        <article class="post-card">
+          <div class="post-head">
+            <a class="post-title" href="/a/{{ p.id }}/edit">
+              <svg class="icon post-icon" aria-hidden="true" focusable="false"><use href="#{{ post_icon(p) }}" xlink:href="#{{ post_icon(p) }}"></use></svg>
+              <span class="post-title-text">{{ p.title }}</span>
+            </a>
+            {% for t in p.tags %}<span class="cat-tag">{{ t }}</span>{% endfor %}
+            {% for f in p.flags %}<span class="flag-tag flag-{{ f.key }}">{{ f.label }}</span>{% endfor %}
+          </div>
+          <div class="post-meta dim">
+            <span class="meta-item">发布时间 {{ p.created }}</span>
+            <span class="meta-item">最后修改 {{ p.updated }}</span>
+          </div>
+          <div class="draft-actions">
+            <a class="btn small" href="/a/{{ p.id }}/edit">继续编辑</a>
+            <form method="post" action="/a/{{ p.id }}/publish" class="inline-form">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <button class="btn small btn-primary" type="submit">发布</button>
+            </form>
+            <form method="post" action="/a/{{ p.id }}/delete" class="inline-form"
+                  data-confirm="确定删除这篇草稿吗？">
+              <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+              <button class="btn small danger" type="submit">删除</button>
+            </form>
+          </div>
+        </article>
+        {% else %}
+        <div class="empty-card">
+          <div class="empty-icon"><img src="/static/note.svg" alt="" aria-hidden="true"></div>
+          <p>草稿箱是空的。</p>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+
+  {% include "author_col.html" %}
+</div>
+{% endblock %}

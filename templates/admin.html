@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}管理入口 · {{ site.site_title }}{% endblock %}
+{% block content %}
+<div class="admin-wrap">
+  <section class="admin-card">
+    <h2 class="panel-title">管理入口</h2>
+
+    {% if error %}<div class="admin-err">{{ error }}</div>{% endif %}
+
+    {% if unlocked %}
+    <div class="admin-row">
+      <a class="btn btn-primary" href="/write">写文章</a>
+      <form method="post">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <input type="hidden" name="action" value="lock">
+        <input type="hidden" name="next" value="{{ next_url }}">
+        <button class="btn ghost" type="submit">锁定</button>
+      </form>
+    </div>
+
+    <h4 class="admin-sub">更换口令</h4>
+    <form method="post" class="admin-form">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="change">
+      <label>新口令<input type="password" name="pass" minlength="6" maxlength="72" required
+                     autocomplete="new-password"></label>
+      <label>再输一次<input type="password" name="pass2" minlength="6" maxlength="72" required
+                     autocomplete="new-password"></label>
+      <button class="btn btn-primary" type="submit">保存</button>
+    </form>
+
+    {% elif not has_pass %}
+    <form method="post" class="admin-form">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="setup">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <label>设置口令<input type="password" name="pass" minlength="6" maxlength="72" required
+                     autocomplete="new-password"></label>
+      <label>再输一次<input type="password" name="pass2" minlength="6" maxlength="72" required
+                     autocomplete="new-password"></label>
+      <button class="btn btn-primary" type="submit">设置</button>
+    </form>
+
+    {% else %}
+    <form method="post" class="admin-form">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="unlock">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <label>口令<input type="password" name="pass" maxlength="72" required
+                   autocomplete="current-password"></label>
+      <button class="btn btn-primary" type="submit">解锁</button>
+    </form>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
