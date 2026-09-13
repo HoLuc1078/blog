@@ -24,6 +24,7 @@ import random
 import re
 import secrets
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, unquote
@@ -31,6 +32,7 @@ from urllib.parse import quote, unquote
 from flask import (Flask, abort, g, jsonify, make_response, redirect,
                    render_template, request, send_from_directory, session, url_for)
 from markupsafe import Markup
+from werkzeug.routing import IntegerConverter
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import md_math
@@ -51,6 +53,16 @@ AVATAR_SIZE = 256
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8848"))
 
+# 反向代理：默认**不信任** X-Forwarded-For。该头可被任何人伪造，一旦采信，
+# 解锁限流 / 评论限流全部失效（可无限爆破站长口令）。只有部署在自有反代
+# 之后才设 TRUST_PROXY=1，并用 PROXY_HOPS 声明可信代理的跳数。
+TRUST_PROXY = os.environ.get("TRUST_PROXY", "") == "1"
+try:
+    PROXY_HOPS = max(1, int(os.environ.get("PROXY_HOPS") or 1))
+except ValueError:
+    PROXY_HOPS = 1
+
+
 BJ_TZ = timezone(timedelta(hours=8))
 
 # 内容限制
@@ -61,6 +73,7 @@ MAX_NAME = 20
 MAX_BIO = 2000
 MAX_LINKS = 20
 MIN_OWNER_PASS = 6
+MAX_OWNER_PASS = 72
 
 # 图形验证码
 CAPTCHA_TTL = 5 * 60
@@ -140,6 +153,21 @@ def get_db():
 
 
 app = Flask(__name__)
+
+
+class _BoundedIntConverter(IntegerConverter):
+    """限制 URL 里整数的位数。
+
+    默认的 int 转换器接受任意长度的数字，/a/<40 位数字> 会让 sqlite3 抛
+    OverflowError（未捕获异常）。这里把 id 限制在 9 位以内。
+    """
+
+    def __init__(self, map, *args, **kwargs):
+        super().__init__(map, *args, **kwargs)
+        self.regex = r"\d{1,9}"
+
+
+app.url_map.converters["int"] = _BoundedIntConverter
 
 # 会话密钥
 if os.environ.get("SECRET_KEY"):
@@ -552,23 +580,59 @@ def _write_avatar(img):
 
 
 def ip_of(req=None):
+    """真实客户端 IP。
+
+    默认**不信任** X-Forwarded-For：该头任何人都能伪造，一旦采信就等于把
+    所有限流（站长口令爆破、评论刷屏）全部作废。只有部署在自有反向代理之后、
+    并显式设置 TRUST_PROXY=1 时才启用，且只取代理链末端的 PROXY_HOPS 跳
+    （即由可信代理写入的那一跳），客户端自行前置的伪造值不会被采信。
+    """
     r = req or request
-    fwd = (r.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-    return fwd or r.remote_addr or ""
+    if TRUST_PROXY:
+        hops = [p.strip() for p in (r.headers.get("X-Forwarded-For") or "").split(",")
+                if p.strip()]
+        if len(hops) >= PROXY_HOPS:
+            return hops[-PROXY_HOPS]
+    return r.remote_addr or ""
+
+
+def safe_next(value):
+    """校验跳转目标，阻断开放重定向。
+
+    只接受站内绝对路径；此外必须显式拒绝反斜杠——浏览器会把 /\\evil.com
+    规范化成 //evil.com（协议相对 URL），从而跳到外站。
+    """
+    v = (value or "").strip()
+    if not v.startswith("/") or v.startswith("//"):
+        return "/"
+    if "\\" in v or any(c in v for c in "\r\n\t"):
+        return "/"
+    return v
 
 
 _RATE = {}
+_RATE_LOCK = threading.Lock()
+_RATE_SWEEP = [0.0]
+_RATE_MAX_KEYS = 50_000      # 键里含客户端 IP，必须设上限，否则可被撑爆内存
+_RATE_MAX_WINDOW = 600
 
 
 def rate_ok(bucket, key, limit, window):
+    """滑动窗口限流（进程内）。"""
     now = time.time()
-    arr = [t for t in _RATE.get((bucket, key), []) if now - t < window]
-    if len(arr) >= limit:
+    with _RATE_LOCK:
+        if now - _RATE_SWEEP[0] > 60 or len(_RATE) > _RATE_MAX_KEYS:
+            _RATE_SWEEP[0] = now
+            for k in [k for k, arr in _RATE.items()
+                      if not arr or now - arr[-1] > _RATE_MAX_WINDOW]:
+                _RATE.pop(k, None)
+        arr = [t for t in _RATE.get((bucket, key), []) if now - t < window]
+        if len(arr) >= limit:
+            _RATE[(bucket, key)] = arr
+            return False
+        arr.append(now)
         _RATE[(bucket, key)] = arr
-        return False
-    arr.append(now)
-    _RATE[(bucket, key)] = arr
-    return True
+        return True
 
 
 # ----------------------------------------------------------------------
@@ -638,6 +702,12 @@ def _md_filter(s):
     return md_math.md_render(s or "")
 
 
+@app.template_filter("md_comment")
+def _md_comment_filter(s):
+    """评论专用：访客可写，按严格模式净化（禁站外图片、强制 rel、收紧 class）。"""
+    return md_math.md_render(s or "", strict=True)
+
+
 @app.before_request
 def _csrf_protect():
     if request.method != "POST":
@@ -701,6 +771,29 @@ def captcha_code():
     return "".join(random.choice(CAPTCHA_ALPHABET) for _ in range(CAPTCHA_LEN))
 
 
+# 验证码答案必须留在服务端。Flask 的会话是「签名但**不加密**」的 Cookie，
+# 把答案写进 session 等于把答案随响应一起发给客户端（base64 一解就出来），
+# 机器人可以直接读自己的 Cookie 拿到答案，验证码形同虚设。
+_CAPTCHA = {}                 # token -> (code, ts)
+_CAPTCHA_LOCK = threading.Lock()
+_CAPTCHA_MAX = 20_000
+
+
+def captcha_issue(code):
+    """存下答案，返回一个不透明 token（放进会话不会泄露答案）。"""
+    now = time.time()
+    token = secrets.token_urlsafe(18)
+    with _CAPTCHA_LOCK:
+        stale = [k for k, (_, ts) in _CAPTCHA.items() if now - ts > CAPTCHA_TTL]
+        for k in stale:
+            _CAPTCHA.pop(k, None)
+        if len(_CAPTCHA) >= _CAPTCHA_MAX:      # 兜底：挤掉最旧的一批
+            for k in sorted(_CAPTCHA, key=lambda k: _CAPTCHA[k][1])[:_CAPTCHA_MAX // 4]:
+                _CAPTCHA.pop(k, None)
+        _CAPTCHA[token] = (code, now)
+    return token
+
+
 def captcha_png(text, w=136, h=46):
     """生成带噪点的验证码图片（bytes）。"""
     from PIL import Image, ImageDraw, ImageFilter
@@ -755,7 +848,7 @@ def captcha_png(text, w=136, h=46):
 @app.route("/captcha.png")
 def captcha_image():
     code = captcha_code()
-    session["captcha"] = {"c": code, "ts": time.time()}
+    session["captcha"] = captcha_issue(code)
     resp = make_response(captcha_png(code))
     resp.headers["Content-Type"] = "image/png"
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -764,12 +857,18 @@ def captcha_image():
 
 
 def captcha_ok(value):
-    rec = session.pop("captcha", None)
-    if not isinstance(rec, dict):
+    """比对验证码：会话里只有 token，真正的答案从未离开服务端。"""
+    token = session.pop("captcha", None)
+    if not isinstance(token, str) or not token:
         return False
-    if time.time() - float(rec.get("ts", 0)) > CAPTCHA_TTL:
+    with _CAPTCHA_LOCK:
+        rec = _CAPTCHA.pop(token, None)      # 一次性：取走即失效
+    if not rec:
         return False
-    return hmac.compare_digest((value or "").strip().upper(), rec.get("c", ""))
+    code, ts = rec
+    if time.time() - ts > CAPTCHA_TTL:
+        return False
+    return hmac.compare_digest((value or "").strip().upper(), code)
 
 
 # ----------------------------------------------------------------------
@@ -1049,8 +1148,11 @@ def delete_article(aid):
 @app.route("/a/<int:aid>/comment", methods=["POST"])
 def add_comment(aid):
     db = get_db()
-    if not db.execute("SELECT id FROM articles WHERE id=?", (aid,)).fetchone():
+    row = db.execute("SELECT id, status FROM articles WHERE id=?", (aid,)).fetchone()
+    if not row:
         abort(404)
+    if (row["status"] or ST_PUBLISHED) == ST_DRAFT and not owner_unlocked():
+        abort(404)          # 草稿连链接都打不开，自然也不该被挂评论
     name = (request.form.get("name") or "").strip()
     content = (request.form.get("content") or "").strip()
     captcha = request.form.get("captcha") or ""
@@ -1122,9 +1224,7 @@ def delete_comment(aid, cid):
 # ----------------------------------------------------------------------
 @app.route("/admin", methods=["GET", "POST"])
 def admin_entry():
-    nxt = request.args.get("next") or request.form.get("next") or "/"
-    if not nxt.startswith("/") or nxt.startswith("//"):
-        nxt = "/"
+    nxt = safe_next(request.args.get("next") or request.form.get("next") or "/")
     error = None
 
     if request.method == "POST":
@@ -1141,6 +1241,8 @@ def admin_entry():
                 p2 = request.form.get("pass2") or ""
                 if len(p1) < MIN_OWNER_PASS:
                     error = f"口令至少 {MIN_OWNER_PASS} 位"
+                elif len(p1) > MAX_OWNER_PASS:
+                    error = f"口令最多 {MAX_OWNER_PASS} 位"
                 elif p1 != p2:
                     error = "两次输入的口令不一致"
                 else:
@@ -1163,6 +1265,8 @@ def admin_entry():
                 error = "当前口令不正确"
             elif len(p_new) < MIN_OWNER_PASS:
                 error = f"新口令至少 {MIN_OWNER_PASS} 位"
+            elif len(p_new) > MAX_OWNER_PASS:
+                error = f"新口令最多 {MAX_OWNER_PASS} 位"
             elif p_new != p_new2:
                 error = "两次输入的新口令不一致"
             else:
@@ -1285,6 +1389,51 @@ def too_large(e):
 @app.errorhandler(500)
 def server_error(e):
     return render_template("error.html", code=500, msg="服务器错误"), 500
+
+
+# ----------------------------------------------------------------------
+# 安全响应头
+# ----------------------------------------------------------------------
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "img-src 'self' data: https: http:; "   # 站外图片要等用户点击后才会加载，
+                                             # 这里必须放行，否则点了也出不来
+    "font-src 'self' data: https://cdn.jsdelivr.net; "
+    "connect-src 'self'; "
+    "object-src 'none'; base-uri 'none'; form-action 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+def request_is_https():
+    if request.is_secure:
+        return True
+    if TRUST_PROXY:
+        proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0]
+        return proto.strip().lower() == "https"
+    return False
+
+
+@app.before_request
+def _cookie_secure_policy():
+    """只有真的走 HTTPS 才给会话 Cookie 打 Secure。
+
+    否则本机 http://127.0.0.1 登录会直接失效（浏览器不会回传 Secure Cookie）。
+    """
+    app.config["SESSION_COOKIE_SECURE"] = request_is_https()
+
+
+@app.after_request
+def _security_headers(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")          # 防点击劫持
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    if request_is_https():
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
 
 
 # ----------------------------------------------------------------------

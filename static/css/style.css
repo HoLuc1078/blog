@@ -1018,3 +1018,21 @@ html[data-theme="dark"] .md-body .md-block-note { --acc: #79c2dd; }
   html[data-theme="care"] .care-range { display: none; }
 }
 
+/* ---------- 评论里的站外图片：默认不加载，点击后才请求 ---------- */
+.ext-img {
+  display: inline-flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  margin: 6px 0; padding: 10px 12px; max-width: 100%;
+  background: var(--solid-card); border: 1px dashed var(--border);
+  border-radius: var(--r-sm);
+}
+.ext-img-tip { font-size: 12px; line-height: 1.5; color: var(--dim); word-break: break-all; }
+.ext-img-load {
+  cursor: pointer; font: inherit; font-size: 13px; line-height: 1.5;
+  padding: 6px 12px; text-align: left;
+  color: var(--accent-ink); background: var(--accent-2);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.ext-img-load:hover { background: var(--accent); color: var(--on-accent); }
+.ext-img-load:disabled { opacity: .6; cursor: default; }
+.md-body img.ext-img-loaded { max-width: 100%; height: auto; border-radius: var(--r-sm); }
+

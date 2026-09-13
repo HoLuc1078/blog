@@ -64,6 +64,25 @@ _SAFE_TAGS = {
 
 _URL_PROTO = re.compile(r"^(https?:|mailto:|#|/|\.\.?/)", re.I)
 
+# 严格模式（评论等访客可写内容）用到的额外规则
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*:")
+_STRICT_CLASS_TAGS = {"code", "pre"}
+_FORCED_REL = "nofollow noopener noreferrer"
+
+
+def _local_src_ok(v):
+    """严格模式的 img src：只放行站内相对路径。
+
+    放行 //host/x.png 或 https://host/x.png 会让任何访客在评论里埋一张
+    图片，从而拿到每个读者的 IP / Referer（追踪信标）。
+    """
+    if not v or len(v) > 2000:
+        return False
+    if v.startswith("//") or _SCHEME_RE.match(v):
+        return False
+    return v.startswith(("/", "./", "../"))
+
+
 _VOID_TAGS = {"br", "hr", "img", "input", "wbr", "source"}
 # 需要整体吞掉直到闭合标签的元素（内容不保留）
 _BLOCK_DROP = {"script", "style", "noscript", "template", "iframe", "object", "embed"}
@@ -126,7 +145,7 @@ def _container_html(name, label, inner_html):
     )
 
 
-def _split_containers(content, store):
+def _split_containers(content, store, strict=False):
     """把 :::type … ::: 容器摘成 HTML 代理，返回剩余可交给 protect 的文本。"""
     lines = content.split("\n")
     res = []
@@ -206,7 +225,7 @@ def _split_containers(content, store):
                     label = mo.group(2)[1:-1].strip()
                 elif mo.group(3):
                     label = mo.group(3).strip()
-                inner_html = md_render("\n".join(inner))
+                inner_html = md_render("\n".join(inner), strict=strict)
                 token = store.new("html", _container_html(name, label, inner_html))
                 # 前后补空行，避免容器与相邻文本合并进同一 <p>
                 res.append("")
@@ -390,76 +409,122 @@ def protect(content):
 
 
 class _Sanitizer(HTMLParser):
-    """白名单净化：丢弃危险标签，仅保留安全标签与受控属性。"""
+    """白名单净化：丢弃危险标签，仅保留安全标签与受控属性。
 
-    def __init__(self):
+    strict=True 用于**访客可写**的内容（评论）：站外图片改为「点击后加载」
+    （默认不发请求，防追踪信标）、禁止复用站内 UI 类名（防界面伪装）、
+    并由服务端强制 rel。
+    """
+
+    def __init__(self, strict=False):
         super().__init__(convert_charrefs=True)
         self.out = []
-        self.depth = 0
         self.drop_stack = []  # 是否处于被丢弃标签内
+        self.strict = strict
 
     def _dropping(self):
         return any(self.drop_stack)
+
+    def _attrs(self, tag, attrs):
+        """按白名单筛选属性，返回 [(小写属性名, 值)]。"""
+        allowed = []
+        for k, v in attrs:
+            kl = k.lower()
+            if kl == "class" and v:
+                if self.strict and tag not in _STRICT_CLASS_TAGS:
+                    # 严格模式只允许 <code>/<pre> 带 class（代码语言），
+                    # 否则评论者可用 .btn / .btn-primary 之类伪造站内按钮
+                    continue
+                cls = re.sub(r"[^0-9A-Za-z_\- ]+", "", v)[:200]
+                if cls.strip():
+                    allowed.append((kl, cls))
+            elif kl == "href" and tag == "a":
+                if _URL_PROTO.match(v or "") and len(v) <= 2000:
+                    allowed.append((kl, v))
+            elif kl == "src" and tag == "img":
+                if self.strict:
+                    ok = _local_src_ok(v)
+                else:
+                    ok = bool(_URL_PROTO.match(v or "")) and len(v or "") <= 2000
+                if ok:
+                    allowed.append((kl, v))
+            elif kl in ("alt", "title", "target", "rel") and tag in ("a", "img") and v:
+                if kl == "rel" and self.strict:
+                    continue                       # 严格模式：rel 由下面统一补
+                if kl == "target" and self.strict and v != "_blank":
+                    continue
+                if len(v) <= 500:
+                    allowed.append((kl, v))
+            elif kl in ("align", "rowspan", "colspan") and tag in ("th", "td", "table"):
+                if re.fullmatch(r"[a-zA-Z0-9]{1,8}", v or ""):
+                    allowed.append((kl, v))
+        if self.strict and tag == "a":
+            # 显式 rel="opener" 会推翻浏览器对 target=_blank 的隐式 noopener
+            # 保护（反向标签劫持），所以作者写的 rel 一律丢弃，统一强制。
+            allowed.append(("rel", _FORCED_REL))
+        return allowed
+
+    def _strict_img_placeholder(self, attrs):
+        """严格模式下的站外图片：返回「点击后加载」占位 HTML。
+
+        返回 None 表示照常处理（站内图片直接显示；非法 src 照旧丢弃）。
+        这样评论里仍然可以贴图，但默认不会向第三方发起任何请求，
+        读者必须看到提示并主动点击才会加载。
+        """
+        src = alt = ""
+        for k, v in attrs:
+            kl = k.lower()
+            if kl == "src" and v:
+                src = v
+            elif kl == "alt" and v:
+                alt = v[:200]
+        if not src or len(src) > 2000 or src.startswith("#"):
+            return None
+        if _local_src_ok(src):
+            return None                      # 站内图片：无第三方风险，直接显示
+        if not _URL_PROTO.match(src):
+            return None                      # 协议不在白名单：交给默认逻辑丢掉
+        host = _SCHEME_RE.sub("", src)
+        if host.startswith("//"):
+            host = host[2:]
+        host = host.split("/")[0].split("?")[0].split("#")[0][:80] or "外部站点"
+        host_e = self._esc_text(host)
+        data_alt = f' data-alt="{self._esc_attr(alt)}"' if alt else ""
+        return (
+            '<span class="ext-img">'
+            f'<span class="ext-img-tip">外部图片 · {host_e} · 点击前不会加载</span>'
+            f'<button type="button" class="ext-img-load" data-src="{self._esc_attr(src)}"{data_alt}'
+            f'>点击加载图片（会向 {host_e} 发起请求，对方能看到你的 IP 和来源页）</button>'
+            "</span>"
+        )
+
+    def _emit(self, tag, attrs):
+        if self.strict and tag == "img":
+            placeholder = self._strict_img_placeholder(attrs)
+            if placeholder is not None:
+                self.out.append(placeholder)
+                return
+        allowed = self._attrs(tag, attrs)
+        attrs_s = "".join(f' {k}="{self._esc_attr(v)}"' for k, v in allowed)
+        self.out.append(f"<{tag}{attrs_s}>")
 
     def handle_starttag(self, tag, attrs):
         if tag in _BLOCK_DROP:
             self.drop_stack.append(True)
             return
-        if tag in _SKIP_TAGS:
-            return
-        if self._dropping():
+        if tag in _SKIP_TAGS or self._dropping():
             return
         if tag not in _SAFE_TAGS:
             # 未知标签：保留内容、去掉外壳
             return
-        allowed = []
-        for k, v in attrs:
-            kl = k.lower()
-            if kl == "class" and v:
-                cls = re.sub(r"[^0-9A-Za-z_\- ]+", "", v)[:200]
-                if cls.strip():
-                    allowed.append((k, cls))
-            elif kl == "href" and tag == "a":
-                if _URL_PROTO.match(v or "") and len(v) <= 2000:
-                    allowed.append((k, v))
-            elif kl == "src" and tag == "img":
-                if _URL_PROTO.match(v or "") and len(v) <= 2000:
-                    allowed.append((k, v))
-            elif kl in ("alt", "title", "target", "rel") and tag in ("a", "img") and v:
-                if len(v) <= 500:
-                    allowed.append((k, v))
-            elif kl in ("align", "rowspan", "colspan") and tag in ("th", "td", "table"):
-                if re.fullmatch(r"[a-zA-Z0-9]{1,8}", v or ""):
-                    allowed.append((k, v))
-        attrs_s = "".join(f' {k}="{self._esc_attr(v)}"' for k, v in allowed)
-        self.out.append(f"<{tag}{attrs_s}>")
+        self._emit(tag, attrs)
 
     def handle_startendtag(self, tag, attrs):
         if tag in _BLOCK_DROP or tag in _SKIP_TAGS or self._dropping():
             return
         if tag not in _SAFE_TAGS:
             return
-        allowed = []
-        for k, v in attrs:
-            kl = k.lower()
-            if kl == "class" and v:
-                cls = re.sub(r"[^0-9A-Za-z_\- ]+", "", v)[:200]
-                if cls.strip():
-                    allowed.append((k, cls))
-            elif kl == "href" and tag == "a":
-                if _URL_PROTO.match(v or "") and len(v) <= 2000:
-                    allowed.append((k, v))
-            elif kl == "src" and tag == "img":
-                if _URL_PROTO.match(v or "") and len(v) <= 2000:
-                    allowed.append((k, v))
-            elif kl in ("alt", "title", "target", "rel") and tag in ("a", "img") and v:
-                if len(v) <= 500:
-                    allowed.append((k, v))
-            elif kl in ("align", "rowspan", "colspan") and tag in ("th", "td", "table"):
-                if re.fullmatch(r"[a-zA-Z0-9]{1,8}", v or ""):
-                    allowed.append((k, v))
-        attrs_s = "".join(f' {k}="{self._esc_attr(v)}"' for k, v in allowed)
-        self.out.append(f"<{tag}{attrs_s}>")
+        self._emit(tag, attrs)
 
     def handle_endtag(self, tag):
         if tag in _BLOCK_DROP:
@@ -494,8 +559,8 @@ class _Sanitizer(HTMLParser):
         return v.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def sanitize(html_text):
-    p = _Sanitizer()
+def sanitize(html_text, strict=False):
+    p = _Sanitizer(strict=strict)
     try:
         p.feed(html_text)
         p.close()
@@ -524,8 +589,11 @@ def _restore(html_text, store):
 _MD = None
 
 
-def md_render(content):
-    """整篇 Markdown + LaTeX -> 安全 HTML（数学留 span 由前端 KaTeX 渲染）。"""
+def md_render(content, strict=False):
+    """整篇 Markdown + LaTeX -> 安全 HTML（数学留 span 由前端 KaTeX 渲染）。
+
+    strict=True 用于评论等访客可写内容：禁站外图片、强制 rel、收紧 class。
+    """
     global _MD
     if _MD is None:
         _MD = _pymd.Markdown(
@@ -536,13 +604,13 @@ def md_render(content):
         return ""
     text = content.replace("\r\n", "\n").replace("\r", "\n")
     hstore = _TokenStore()
-    md_text = _split_containers(text, hstore)
+    md_text = _split_containers(text, hstore, strict=strict)
     protected, store = protect(md_text)
     html_text = _MD.convert(protected)
     # 容器代理若被单独包进 <p>，把该 <p> 去掉（容器是块级元素）
     for token in hstore.map:
         html_text = html_text.replace(f"<p>{token}</p>", token)
-    safe = sanitize(html_text)
+    safe = sanitize(html_text, strict=strict)
     out = _restore(safe, store)
     return _restore(out, hstore)
 

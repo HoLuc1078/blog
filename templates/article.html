@@ -95,7 +95,7 @@
               </form>
               {% endif %}
             </div>
-            <div class="md-mini md-body cmt-content">{{ c.content | md | safe }}</div>
+            <div class="md-mini md-body cmt-content">{{ c.content | md_comment | safe }}</div>
 
             {% if c.replies %}
             <div class="cmt-replies">
@@ -115,7 +115,7 @@
                     </form>
                     {% endif %}
                   </div>
-                  <div class="md-mini md-body cmt-content">{{ r.content | md | safe }}</div>
+                  <div class="md-mini md-body cmt-content">{{ r.content | md_comment | safe }}</div>
                 </div>
               </div>
               {% endfor %}

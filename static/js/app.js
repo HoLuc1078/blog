@@ -126,6 +126,25 @@
     });
   }
 
+  /* ---------- 评论里的站外图片：默认不发起任何请求，点击后才加载 ---------- */
+  function bindExternalImages() {
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest ? e.target.closest(".ext-img-load") : null;
+      if (!btn || btn.disabled) return;
+      e.preventDefault();
+      var url = btn.getAttribute("data-src");
+      if (!url) return;
+      var img = document.createElement("img");
+      img.className = "ext-img-loaded";
+      img.alt = btn.getAttribute("data-alt") || "外部图片";
+      img.referrerPolicy = "no-referrer";       // 不把本文地址带给第三方
+      img.addEventListener("error", function () { toast("图片加载失败", "err"); });
+      // 先放进 DOM 再设 src：游离的 <img> 配合 loading=lazy 可能永远不触发加载
+      btn.replaceWith(img);
+      img.src = url;                            // 只有点了这里才会发起第三方请求
+    });
+  }
+
   /* ---------- 作者栏编辑弹窗（站长解锁后可见） ---------- */
   function bindAuthorEditor() {
     var modal = $("#authorEditModal");
@@ -313,6 +332,7 @@
     bindTheme();
     bindCare();
     bindCaptcha();
+    bindExternalImages();
     bindAuthorEditor();
     bindCommentReply();
     attachCodeCopy(document.body);
