@@ -62,7 +62,15 @@ body {
 /* ---------- 背景：底图 + 一层白色薄纱（保持轻盈可爱） ---------- */
 .bg {
   position: fixed; inset: 0; z-index: -2; overflow: hidden;
-  background: url("/static/bg.jpg") center / cover no-repeat fixed, var(--bg-grad);
+  /* 这里**不要**写 background-attachment: fixed：
+     本元素已经是 position: fixed + inset: 0，居中 / cover 的结果完全一样，
+     但 fixed 会让背景走 Blink 里「不跟随常规 effect 层级」的绘制路径
+     （crbug 40255683 明说 “the scroll offset of the background does not follow
+     the normal hierarchy of effects”），而 backdrop-filter 的回读正是建立在
+     常规绘制节点上的 —— 两者叠加时模糊会取到跟着可见矩形走的错误区域
+     （w3c/fxtf-drafts#238、CSSWG 2018-01-17 记录），表现为玻璃面板上出现
+     随重绘（例如鼠标划过）变化的深浅块。去掉 fixed 观感不变。 */
+  background: url("/static/bg.jpg") center / cover no-repeat, var(--bg-grad);
   background-color: var(--bg-base);
 }
 .bg::after {
@@ -469,6 +477,97 @@ form.inline-form { display: inline-block; margin: 0; }
 .md-body .md-block-tip { --acc: #7a5cd0; }
 .md-body .md-block-note { --acc: #2f8bb0; }
 .md-body del { color: var(--dim); }
+/* ---------- 洛谷扩展语法（对齐 / 折叠容器 / 题记 / 任务列表 / 脚注 / 行号） ---------- */
+/* 容器现在是 <details><summary>：点标题即可折叠，和洛谷一致 */
+.md-body summary.md-block-head {
+  list-style: none; cursor: pointer; user-select: none;
+  border-bottom: none;                    /* 收起时不该留一条分隔线 */
+}
+.md-body summary.md-block-head::-webkit-details-marker { display: none; }
+.md-body summary.md-block-head::marker { content: ""; }
+.md-body details.md-block[open] > summary.md-block-head { border-bottom: 1px solid var(--border-soft); }
+.md-body .md-block-caret { transition: transform .15s ease; }
+.md-body details.md-block[open] .md-block-caret { transform: rotate(180deg); }
+.md-body summary.md-block-head:hover .md-block-tag { text-decoration: underline; text-underline-offset: 3px; }
+
+/* :::align{center|right|left} —— 只影响段落与标题（和洛谷的语义一致） */
+.md-body .md-align { margin: 10px 0; }
+.md-body .md-align-left   > :is(p, h1, h2, h3, h4, h5, h6) { text-align: left; }
+.md-body .md-align-center > :is(p, h1, h2, h3, h4, h5, h6) { text-align: center; }
+.md-body .md-align-right  > :is(p, h1, h2, h3, h4, h5, h6) { text-align: right; }
+
+/* :::epigraph[——署名] —— 靠右的题记块，署名带分隔线并右对齐 */
+.md-body .epigraph {
+  width: 40%; min-width: 220px; margin: 14px 0 14px auto;
+  padding: 2px 0 2px 12px; border-left: 3px solid var(--accent);
+  color: var(--dim); font-size: .95em;
+}
+.md-body .epigraph > p { margin: 4px 0; }
+.md-body .epigraph.has-source > :nth-last-child(2) { margin-bottom: 0; }
+.md-body .md-epigraph-src {
+  margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-soft);
+  text-align: right; font-style: italic;
+}
+
+/* 任务列表：- [x] / - [ ] */
+.md-body ul.contains-task-list { list-style: none; padding-left: 4px; }
+.md-body li.task-list-item { list-style: none; margin-left: 0; }
+.md-body li.task-list-item > input[type="checkbox"] {
+  width: 13px; height: 13px; margin: 0 6px 0 0; vertical-align: -1px;
+  accent-color: var(--accent-deep); cursor: default;
+}
+
+/* 脚注（GFM / 洛谷） */
+.md-body .footnote {
+  margin-top: 22px; padding-top: 10px; font-size: 13.5px; color: var(--dim);
+  border-top: 1px solid var(--border);
+}
+.md-body .footnote::before { content: none; }
+.md-body .footnote hr { display: none; }
+.md-body .footnote ol { padding-left: 22px; margin: 0; }
+.md-body .footnote li { margin: 3px 0; }
+.md-body .footnote p { margin: 3px 0; }
+.md-body .footnote-ref { font-weight: 700; text-decoration: none; }
+.md-body .footnote-backref { text-decoration: none; margin-left: 5px; }
+
+/* 代码块：```cpp line-numbers``` 行号 + ```cpp lines=5-6,11``` 区间高亮 */
+.md-body pre.line-numbers { padding-left: 3.8em; }
+.md-body pre.line-numbers code { counter-reset: md-line; }
+.md-body .md-line { display: block; min-height: 1.7em; position: relative; }
+.md-body pre.line-numbers .md-line { counter-increment: md-line; }
+.md-body pre.line-numbers .md-line::before {
+  content: counter(md-line);
+  position: absolute; left: -3.5em; width: 2.6em; text-align: right;
+  color: var(--dim); opacity: .7; user-select: none; pointer-events: none;
+}
+.md-body .md-line.md-hl {
+  background: rgba(240, 166, 192, .18);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* ::cute-table{three|tuack} —— 三线表 / Tuack 表格 */
+.md-body .cute-table { margin: 12px 0; overflow-x: auto; }
+.md-body .cute-table table { display: table; width: 100%; margin: 0; border-collapse: collapse; }
+.md-body .cute-table caption {
+  caption-side: top; text-align: center; padding: 4px 0 6px;
+  font-size: 13px; color: var(--dim);
+}
+.md-body .cute-table-three table { border-top: 2px solid var(--accent-deep); border-bottom: 2px solid var(--accent-deep); }
+.md-body .cute-table-three th, .md-body .cute-table-three td { border: none; padding: 6px 12px; }
+.md-body .cute-table-three thead th { border-bottom: 1px solid var(--accent-deep); background: none; }
+.md-body .cute-table-tuack table { border-top: 2px solid var(--accent-deep); border-bottom: 2px solid var(--accent-deep); }
+.md-body .cute-table-tuack th, .md-body .cute-table-tuack td { border: none; padding: 5px 11px; }
+.md-body .cute-table-tuack thead th { border-bottom: 1px solid var(--accent-deep); background: none; }
+.md-body .cute-table-tuack tbody tr { border-bottom: 1px solid var(--border-soft); }
+.md-body .cute-table-tuack col:not(:first-child) { border-left: 1px solid var(--border-soft); }
+.md-body .cute-table-tuack col.cute-table-bold-col { border-left: 2px solid var(--accent-deep); }
+
+/* ::anti-ai[隐藏文字] —— 人看不见，但复制正文时会一起带走 */
+.md-body .invisible {
+  position: absolute; top: 0; opacity: 0; pointer-events: none;
+  user-select: text; -webkit-user-select: text;
+}
+
 .md-body table { border-collapse: collapse; margin: 10px 0; font-size: 13.5px; width: 100%; display: block; overflow-x: auto; }
 .md-body th, .md-body td { border: 1px solid var(--border-soft); padding: 6px 12px; text-align: left; }
 .md-body th { background: #fdeef6; font-weight: 700; color: #4d3b52; }
@@ -681,6 +780,18 @@ body.editor-page { overflow: hidden; }
 .ed-main .md-body .md-block-error, .ed-main .md-body .md-block-danger { --acc: #f08a95; }
 .ed-main .md-body .md-block-tip { --acc: #b3a0f0; }
 .ed-main .md-body .md-block-note { --acc: #79c2dd; }
+.ed-main .md-body .epigraph { color: var(--ed-dim); border-left-color: var(--accent); }
+.ed-main .md-body .md-epigraph-src { border-top-color: var(--ed-line); }
+.ed-main .md-body .footnote { border-top-color: var(--ed-line); color: var(--ed-dim); }
+.ed-main .md-body .md-line.md-hl { background: rgba(240, 166, 192, .16); }
+.ed-main .md-body .cute-table caption { color: var(--ed-dim); }
+.ed-main .md-body .cute-table-three table,
+.ed-main .md-body .cute-table-tuack table,
+.ed-main .md-body .cute-table-three thead th,
+.ed-main .md-body .cute-table-tuack thead th { border-color: var(--accent); }
+.ed-main .md-body .cute-table-tuack tbody tr { border-bottom-color: var(--ed-line); }
+.ed-main .md-body .cute-table-tuack col:not(:first-child) { border-left-color: var(--ed-line); }
+.ed-main .md-body summary.md-block-head:hover .md-block-tag { color: #fff; }
 
 /* 发布页控件去圆角 */
 .editor-page .btn,
@@ -796,8 +907,17 @@ body.editor-page { overflow: hidden; }
 .editor-page .chk { color: var(--ed-ink); font-size: 13.5px; }
 .editor-page .chk input { accent-color: var(--accent); }
 
-/* 编辑页：文章图标选择 */
-.icon-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 编辑页：文章图标选择（iconfont 那整套，数量多，所以给搜索 + 随机 + 滚动区） */
+.icon-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.icon-tools .icon-search { flex: 1; min-width: 0; font-size: 13px; padding: 6px 9px; }
+.icon-tools .btn { flex-shrink: 0; }
+.icon-picks {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  max-height: 236px; overflow-y: auto; padding-right: 2px;
+}
+.icon-picks::-webkit-scrollbar { width: 6px; }
+.icon-picks::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.26); border-radius: 0; }
+.editor-page .icon-picks::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.44); }
 .icon-pick {
   display: inline-flex; align-items: center; justify-content: center;
   width: 34px; height: 34px; padding: 0; cursor: pointer;
@@ -806,6 +926,7 @@ body.editor-page { overflow: hidden; }
 .icon-pick .icon { width: 20px; height: 20px; }
 .icon-pick:hover { background: rgba(255, 255, 255, .20); }
 .icon-pick.on { border-color: var(--accent); background: rgba(240, 166, 192, .24); }
+.icon-count { margin-top: 6px; font-size: 11.5px; }
 
 /* 评论回复 */
 .cmt-reply {
@@ -867,13 +988,27 @@ body.editor-page { overflow: hidden; }
 /* ============================================================
    主题：护眼滤镜 / 暗黑模式（html[data-theme="care" | "dark"]）
    ============================================================ */
-/* 护眼：整屏暖色、压蓝光（强度由顶栏滑块调，--care-strength 由前端写入） */
+/* 护眼：整屏暖色、压蓝光（强度由顶栏滑块调，--care-strength 由前端写入）
+   ------------------------------------------------------------------
+   这里**刻意不用** mix-blend-mode: multiply，改用普通混合的暖色盖层：
+   Chromium 在 mix-blend-mode 与 backdrop-filter 面板处于同一个混合组时会
+   合成出错 —— 混合的源图可能取到「过滤前的上一层」而不是过滤后的背景
+   （crbug 503307127 工程师原话；另有 crbug 40855567 / 496284084 记录该组合
+   在鼠标悬停触发重绘时出现色块，Firefox 正常），面板被重复混合的地方就会
+   显得更深。原写法还把 multiply 无条件挂在 DOM 里（只有 opacity 受主题控制），
+   相当于任何主题下都带着一个非 normal 混合层。
+   现在的写法：只在护眼档出现（其余主题 display:none），恒为 normal 混合、
+   不设 opacity 属性、不做 opacity 过渡（crbug 40490696 的成因正是
+   「为 opacity 动画建的那层 + backdrop-filter」），强度仍由滑块控制。
+   标定值：暖色 rgba(255,197,120)，α = --care-strength × --care-tint。
+   想让护眼更浓/更淡，只改 --care-tint 一个数即可。 */
 .theme-tint {
   position: fixed; inset: 0; z-index: 8000; pointer-events: none;
-  opacity: 0; transition: opacity .25s ease;
-  background: #ffd39a; mix-blend-mode: multiply;
+  display: none;
+  background: rgba(255, 197, 120, calc(var(--care-strength) * var(--care-tint, .30)));
+  transition: background-color .25s ease;
 }
-html[data-theme="care"] .theme-tint { opacity: var(--care-strength); }
+html[data-theme="care"] .theme-tint { display: block; }
 
 /* 顶栏主题切换 */
 .theme-picker {
@@ -1012,6 +1147,15 @@ html[data-theme="dark"] .md-body .md-block-error,
 html[data-theme="dark"] .md-body .md-block-danger { --acc: #f08a95; }
 html[data-theme="dark"] .md-body .md-block-tip { --acc: #b3a0f0; }
 html[data-theme="dark"] .md-body .md-block-note { --acc: #79c2dd; }
+/* 洛谷扩展语法在暗色下 */
+html[data-theme="dark"] .md-body .md-line.md-hl { background: rgba(240, 166, 192, .14); }
+html[data-theme="dark"] .md-body .footnote { border-top-color: var(--border); }
+html[data-theme="dark"] .md-body .cute-table-three table,
+html[data-theme="dark"] .md-body .cute-table-tuack table,
+html[data-theme="dark"] .md-body .cute-table-three thead th,
+html[data-theme="dark"] .md-body .cute-table-tuack thead th { border-color: var(--accent-deep); }
+html[data-theme="dark"] .md-body .cute-table-tuack tbody tr { border-bottom-color: var(--border-soft); }
+html[data-theme="dark"] .md-body .cute-table-tuack col:not(:first-child) { border-left-color: var(--border-soft); }
 
 /* 窄屏顶栏放不下强度滑块 */
 @media (max-width: 700px) {

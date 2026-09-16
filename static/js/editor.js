@@ -93,8 +93,11 @@
     });
   }
 
-  /* ---------- 文章图标 ---------- */
+  /* ---------- 文章图标（iconfont 那整套 + 自绘的 5 个：可搜索、可随机） ---------- */
   var iconPicks = [].slice.call(document.querySelectorAll("#edIconPicks .icon-pick"));
+  var iconSearchEl = $("edIconSearch");
+  var iconCountEl = $("edIconCount");
+  var iconRandomBtn = $("edIconRandom");
 
   function setIcon(name) {
     if (iconEl) iconEl.value = name || "";
@@ -108,6 +111,42 @@
       scheduleDraft();
     });
   });
+
+  function filterIcons() {
+    var q = (iconSearchEl ? iconSearchEl.value : "").trim().toLowerCase();
+    var shown = 0;
+    iconPicks.forEach(function (b) {
+      var name = (b.getAttribute("data-icon") || "").toLowerCase();
+      var hit = !q || name.indexOf(q) >= 0;
+      b.hidden = !hit;
+      if (hit) shown++;
+    });
+    if (iconCountEl) {
+      iconCountEl.textContent = q
+        ? "匹配 " + shown + " / " + iconPicks.length + " 个图标"
+        : "共 " + iconPicks.length + " 个图标";
+    }
+  }
+  if (iconSearchEl) {
+    iconSearchEl.addEventListener("input", filterIcons);
+    iconSearchEl.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === "Escape") {
+        e.preventDefault();
+        if (e.key === "Escape") { iconSearchEl.value = ""; filterIcons(); }
+      }
+    });
+  }
+  if (iconRandomBtn) {
+    iconRandomBtn.addEventListener("click", function () {
+      if (!iconPicks.length) return;
+      var pick = iconPicks[Math.floor(Math.random() * iconPicks.length)];
+      var name = pick.getAttribute("data-icon") || "";
+      setIcon(name);
+      if (pick.scrollIntoView) pick.scrollIntoView({ block: "nearest" });
+      scheduleDraft();
+      toast("随机图标：" + name, "ok");
+    });
+  }
 
   /* ---------- Ctrl+B / Ctrl+I：给选中的文字套上标记 ---------- */
   function applyInsert(pre, suf) {

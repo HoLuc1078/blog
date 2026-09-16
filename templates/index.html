@@ -3,6 +3,8 @@
 {% block content %}
 <div class="layout">
   <main class="main-col">
+    {# 本页文章用到的 iconfont 图标：只把需要的 <symbol> 内联进来 #}
+    {{ post_icon_sprites(posts) }}
 
     <section class="latest-board">
       <header class="latest-head">

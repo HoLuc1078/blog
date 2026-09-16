@@ -99,8 +99,15 @@ FLAG_LABEL = dict(FLAGS)
 ST_PUBLISHED = "published"
 ST_DRAFT = "draft"
 
-# 文章标题前的 svg 图标（内联 sprite，见 templates/icons.html）
-POST_ICONS = ["icon-lizi", "icon-peach", "icon-sakura", "icon-rainbow", "icon-clover"]
+# 文章标题前的 svg 图标（洛谷式的 <svg class="icon"><use href="#…"></use></svg>）
+#   · 站内自绘的 5 个定义在 templates/icons.html 里（页面总会内联，老文章存的就是这些名字）；
+#   · 其余来自 static/icons.svg —— yc-lain 博客那套 iconfont 的 404 个图标，
+#     由 gen_icons.py 生成；编辑器选择器直接 <use href="/static/icons.svg#ic-x"> 引用，
+#     文章页只把用到的那一两个 <symbol> 内联进页面（见 post_icon_sprites）。
+SITE_ICONS = ["icon-lizi", "icon-peach", "icon-sakura", "icon-rainbow", "icon-clover"]
+ICON_SPRITE = os.path.join(BASE_DIR, "static", "icons.svg")
+_ICON_CACHE = {"mtime": None, "map": {}, "names": ()}
+_SYMBOL_RE = re.compile(r'<symbol\b[^>]*\bid="([^"]+)"[^>]*>.*?</symbol>', re.S)
 
 # ----------------------------------------------------------------------
 # 数据库
@@ -404,14 +411,41 @@ def _parse_links(raw):
     return clean_links(data)[0]
 
 
+def _icon_sprite():
+    """static/icons.svg 里的全部 <symbol>：{名字: 片段}（按 mtime 自动重载）。"""
+    try:
+        mtime = os.path.getmtime(ICON_SPRITE)
+    except OSError:
+        return _ICON_CACHE["map"]
+    if _ICON_CACHE["mtime"] != mtime:
+        try:
+            with open(ICON_SPRITE, "r", encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            return _ICON_CACHE["map"]
+        found = {}
+        for m in _SYMBOL_RE.finditer(text):
+            found.setdefault(m.group(1), m.group(0))
+        _ICON_CACHE.update(mtime=mtime, map=found, names=tuple(found))
+    return _ICON_CACHE["map"]
+
+
+def post_icons():
+    """图标选择器里的全部图标：自绘的 5 个排前面，后面是 iconfont 那整套。"""
+    sprite = _icon_sprite()
+    return SITE_ICONS + [n for n in sprite if n not in SITE_ICONS]
+
+
 def clean_icon(value):
-    """只接受 sprite 里存在的图标名，其余（含空）→ 空串，表示按 id 自动分配。"""
+    """只接受存在的图标名，其余（含空）→ 空串，表示按 id 自动分配。"""
     v = (value or "").strip() if isinstance(value, str) else ""
-    return v if v in POST_ICONS else ""
+    if not v:
+        return ""
+    return v if (v in SITE_ICONS or v in _icon_sprite()) else ""
 
 
 def post_icon(post):
-    """文章标题前的 svg 图标：用文章自己选的；没选就按 id 稳定分配。
+    """文章标题前的 svg 图标：用文章自己选的；没选就按 id 在自绘的 5 个里稳定分配。
 
     传文章 dict / sqlite3.Row，也兼容直接传 id。
     """
@@ -420,16 +454,45 @@ def post_icon(post):
         icon, aid = post.get("icon") or "", post.get("id")
     elif isinstance(post, sqlite3.Row):
         icon, aid = (post["icon"] if "icon" in post.keys() else "") or "", post["id"]
-    if icon in POST_ICONS:
+    if icon in SITE_ICONS or icon in _icon_sprite():
         return icon
     try:
-        return POST_ICONS[int(aid) % len(POST_ICONS)]
+        return SITE_ICONS[int(aid) % len(SITE_ICONS)]
     except (TypeError, ValueError):
-        return POST_ICONS[0]
+        return SITE_ICONS[0]
+
+
+def post_icon_ref(name):
+    """<use> 该指向哪里：自绘的在页面内联 sprite 里，iconfont 的在 static/icons.svg 里。"""
+    if name in SITE_ICONS or name not in _icon_sprite():
+        return "#" + name
+    return "/static/icons.svg#" + name
+
+
+def post_icon_sprites(posts):
+    """把这一页用到的 iconfont 图标内联成 <symbol>（同名只出现一次）。
+
+    自绘的 5 个已经在 templates/icons.html 里了，这里跳过（否则 id 会重复）；
+    这样文章页为了图标不需要额外拉 1.2MB 的 sprite。
+    """
+    sprite = _icon_sprite()
+    need, seen = [], set()
+    for p in posts or []:
+        name = post_icon(p)
+        if name in seen or name in SITE_ICONS or name not in sprite:
+            continue
+        seen.add(name)
+        need.append(sprite[name])
+    if not need:
+        return Markup("")
+    return Markup('<svg class="icon-sprite" aria-hidden="true" focusable="false" '
+                  'xmlns="http://www.w3.org/2000/svg">%s</svg>' % "".join(need))
 
 
 app.jinja_env.globals["post_icon"] = post_icon
-app.jinja_env.globals["POST_ICONS"] = POST_ICONS
+app.jinja_env.globals["post_icons"] = post_icons
+app.jinja_env.globals["post_icon_ref"] = post_icon_ref
+app.jinja_env.globals["post_icon_sprites"] = post_icon_sprites
 
 
 # ---- 文章标签（不安全 / 负能量 / 非学术）----

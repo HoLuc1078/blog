@@ -74,15 +74,24 @@
         </div>
 
         <h4 class="side-title">图标</h4>
+        {% set all_icons = post_icons() %}
+        <div class="icon-tools">
+          <input type="text" id="edIconSearch" class="icon-search" autocomplete="off"
+                 spellcheck="false" placeholder="搜索图标名">
+          <button class="btn ghost small" type="button" id="edIconRandom"
+                  title="随机挑一个图标">随机</button>
+        </div>
         <div class="icon-picks" id="edIconPicks">
-          {% for ic in POST_ICONS %}
-          <button type="button" class="icon-pick" data-icon="{{ ic }}" aria-label="{{ ic }}">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="#{{ ic }}" xlink:href="#{{ ic }}"></use></svg>
+          {% for ic in all_icons %}
+          <button type="button" class="icon-pick" data-icon="{{ ic }}"
+                  title="{{ ic }}" aria-label="{{ ic }}">
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="{{ post_icon_ref(ic) }}" xlink:href="{{ post_icon_ref(ic) }}"></use></svg>
           </button>
           {% endfor %}
         </div>
+        <div class="icon-count dim small" id="edIconCount">共 {{ all_icons | length }} 个图标</div>
         <input type="hidden" id="edIcon"
-               value="{{ post_icon(post) if post else POST_ICONS[0] }}">
+               value="{{ post_icon(post) if post else all_icons[0] }}">
 
         <h4 class="side-title">置顶量</h4>
         <input type="number" id="edPin" min="0" max="999" step="1"
@@ -118,5 +127,6 @@
 
 <script src="/static/js/app.js"></script>
 <script src="/static/js/editor.js"></script>
+<div id="toast-box" aria-live="polite"></div>
 </body>
 </html>
