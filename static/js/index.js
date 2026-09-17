@@ -1,5 +1,6 @@
 /* 首页列表：过滤（不显示不安全/负能量/非学术）、按标签筛选、翻页、每页篇数
    —— 全部在前端做，勾选/翻页都不发任何请求；选择记在 localStorage 里，换页回来还在。
+   每页篇数是可手输的数字框（1–MAX_PER，没有"全部"这一档）：越界自动夹紧，清空后失焦还原。
    卡片上的标签链接（/?tag=xxx）与服务端都只是把「初始选中标签」带进来，筛选照旧在前端完成 */
 (function () {
   "use strict";
@@ -7,7 +8,7 @@
   if (!list) return;
   var meta = document.getElementById("listMeta");
   var pager = document.getElementById("pager");
-  var perSel = document.getElementById("perPage");
+  var perInput = document.getElementById("perPage");
   var emptyEl = document.getElementById("listEmpty");
   var resetBtn = document.getElementById("filterReset");
   var bar = document.getElementById("filterBar");
@@ -15,6 +16,7 @@
   var boxes = [].slice.call(document.querySelectorAll("#filterBar input[data-hide]"));
   var chips = [].slice.call(document.querySelectorAll(".tag-chip[data-tag]"));
   var KEY = "petal.home.filter";
+  var MIN_PER = 1, MAX_PER = 200, DEFAULT_PER = 12;   // 与 templates/index.html 的 min / max / value 对应
 
   var cards = [].slice.call(list.querySelectorAll(".post-card")).map(function (el) {
     var rawFlags = el.getAttribute("data-flags") || "";
@@ -26,19 +28,36 @@
     };
   });
 
-  var state = { hides: [], tags: [], per: 12, page: 1 };
+  var state = { hides: [], tags: [], per: DEFAULT_PER, page: 1 };
   try {
     var saved = JSON.parse(localStorage.getItem(KEY) || "null");
     if (saved && typeof saved === "object") {
       if (Array.isArray(saved.hides)) state.hides = saved.hides;
       if (Array.isArray(saved.tags)) state.tags = saved.tags;
-      if (typeof saved.per === "number") state.per = saved.per;
+      // 旧版本存过 0（那时表示"全部"）：现在没有这一档，直接回落到默认值
+      if (typeof saved.per === "number" && isFinite(saved.per) && saved.per >= MIN_PER) {
+        state.per = clampPer(saved.per);
+      }
     }
   } catch (e) { /* ignore */ }
   if (curTag) state.tags = [curTag];      // URL 上的标签优先于本地记录
 
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  }
+
+  /* 每页篇数：夹到 [MIN_PER, MAX_PER]，非法值退回默认 */
+  function clampPer(n) {
+    n = Math.floor(Number(n));
+    if (!isFinite(n)) return DEFAULT_PER;
+    return Math.max(MIN_PER, Math.min(MAX_PER, n));
+  }
+
+  /* 把 state.per 写回输入框（正在输入时不打断，失焦时再对齐） */
+  function syncPerInput() {
+    if (!perInput || document.activeElement === perInput) return;
+    var v = String(state.per);
+    if (perInput.value !== v) perInput.value = v;
   }
 
   function matches(card) {
@@ -56,7 +75,6 @@
   }
 
   function pageCount(n) {
-    if (!state.per) return 1;                                 // 0 = 全部
     return Math.max(1, Math.ceil(n / state.per));
   }
 
@@ -79,8 +97,8 @@
     var pages = pageCount(shown.length);
     if (state.page > pages) state.page = pages;
     if (state.page < 1) state.page = 1;
-    var start = state.per ? (state.page - 1) * state.per : 0;
-    var end = state.per ? start + state.per : shown.length;
+    var start = (state.page - 1) * state.per;
+    var end = start + state.per;
     shown.slice(start, end).forEach(function (c) { c.el.hidden = false; });
 
     if (emptyEl) emptyEl.hidden = shown.length > 0;
@@ -91,12 +109,13 @@
     }
     if (resetBtn) resetBtn.hidden = !(state.hides.length || state.tags.length);
     renderPager(pages);
+    syncPerInput();
   }
 
   function renderPager(pages) {
     if (!pager) return;
     pager.innerHTML = "";
-    if (state.per && pages > 1) {
+    if (pages > 1) {
       pager.appendChild(pageBtn("‹ 上一页", state.page - 1, state.page <= 1, "btn small"));
       var nums = pageNums(state.page, pages);
       nums.forEach(function (n) {
@@ -112,7 +131,6 @@
       });
       pager.appendChild(pageBtn("下一页 ›", state.page + 1, state.page >= pages, "btn small"));
     }
-    if (perSel) perSel.value = String(state.per);
   }
 
   function pageNums(cur, pages) {
@@ -173,13 +191,20 @@
       render();
     });
   });
-  if (perSel) {
-    perSel.addEventListener("change", function () {
-      state.per = parseInt(perSel.value, 10) || 0;
+  if (perInput) {
+    function onPerInput() {
+      var raw = String(perInput.value || "").trim();
+      if (!raw) return;                        // 清空时先不动，失焦后再还原上一个有效值
+      var n = parseInt(raw, 10);
+      if (!isFinite(n) || n < MIN_PER) return;
+      state.per = clampPer(n);                 // 超过 MAX_PER 会被夹紧，失焦时写回输入框
       state.page = 1;
       save();
       render();
-    });
+    }
+    perInput.addEventListener("input", onPerInput);
+    perInput.addEventListener("change", onPerInput);
+    perInput.addEventListener("blur", function () { perInput.value = String(state.per); });
   }
   if (resetBtn) {
     resetBtn.addEventListener("click", function () {

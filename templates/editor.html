@@ -6,11 +6,16 @@
 <title>{{ '编辑文章' if post and post.id else '写文章' }} · {{ site.site_title }}</title>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <meta name="csrf-token" content="{{ csrf_token() }}">
-<script>(function(){try{var d=document.documentElement;var t=localStorage.getItem("petal.theme")||"light";if(t!=="light"&&t!=="care"&&t!=="dark")t="light";d.setAttribute("data-theme",t);var c=parseInt(localStorage.getItem("petal.care")||"52",10);if(!(c>=10&&c<=85))c=52;d.style.setProperty("--care-strength",(c/100).toFixed(2));}catch(e){document.documentElement.setAttribute("data-theme","light");}})();</script>
+<script nonce="{{ csp_nonce() }}">(function(){try{var d=document.documentElement;var t=localStorage.getItem("petal.theme")||"light";if(t!=="light"&&t!=="care"&&t!=="dark")t="light";d.setAttribute("data-theme",t);var c=parseInt(localStorage.getItem("petal.care")||"52",10);if(!(c>=10&&c<=85))c=52;d.style.setProperty("--care-strength",(c/100).toFixed(2));}catch(e){document.documentElement.setAttribute("data-theme","light");}})();</script>
 <link rel="stylesheet" href="/static/css/style.css">
 <style>{{ theme_css() }}</style>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<!-- 站外资源全部带 SRI：CDN 被投毒 / 链路上被换文件时，浏览器直接不执行（integrity 不匹配）。
+     KaTeX 起不来只会退化成「公式显示为源码」，不会白屏。
+     katex.min.js / katex.min.css 的 sha384 由 jsdelivr 与 unpkg 两份同版本文件比对一致后取。 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+      integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"
+        integrity="sha384-7zkQWkzuo3B5mTepMUcHkMB5jZaolc2xDwL6VFqjFALcbeS9Ggm/Yr2r3Dy4lfFg" crossorigin="anonymous"></script>
 </head>
 <body class="editor-page" data-aid="{% if post %}{{ post.id }}{% endif %}"
       data-status="{{ post.status if post else '' }}">

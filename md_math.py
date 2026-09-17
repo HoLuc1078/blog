@@ -35,13 +35,23 @@ Markdown 语法，外加本站原有的 LaTeX 支持。
 5. `_LuoguPostprocessor`  代码块行号 / 区间高亮（拆行成 <span class="md-line">）
 6. `sanitize()`           白名单净化（XSS 防护），类名走白名单，只放行任务列表复选框
 7. `_restore()`           回填公式 / 行内代码 / 删除线 / 容器 HTML
+                          ⚠ 回填发生在净化**之后**：回填串的安全由渲染器自己保证，
+                            而且用户输入里绝不允许出现代理字符（见下）
 
-私有代理字符
-------------
+私有代理字符（内部占位符 —— 渲染入口一律剥离）
+--------------------------------------------
 \\uE000{i}\\uE001   行内 / 行间公式
 \\uE002{i}\\uE003   行内代码
 \\uE004{i}\\uE005   预渲染容器 HTML（净化后回填，内容已在递归时净化过）
 \\uE006{i}\\uE007   cute-table 指令（交给 treeprocessor 包裹后面的表格）
+
+这些字符只该由渲染器产生，所以 `md_render()` 入口会把用户输入里的 \\uE000~\\uE007
+**全部删掉**（见 `_TOKEN_CHARS`）。不删的后果（实测过的存储型 XSS）：`_restore()`
+是在 `sanitize()` **之后**把占位符原样换成 HTML 的，而回填串自带引号
+（`<span class="math …">`、`<details class="md-block …">`）——用户只要在链接 /
+图片的**属性位置**引用到一个 token（例如 `[x](/\uE0020\uE003)`，前面那个 `/`
+让 href 通过 `_URL_PROTO` 校验），回填时引号就被塞进属性值内部，闭合后即是任意属性
+注入（`onmouseover` / `onerror`），评论即可触发。
 """
 
 import re
@@ -62,6 +72,10 @@ H_BEGIN = "\uE004"
 H_END = "\uE005"
 K_BEGIN = "\uE006"
 K_END = "\uE007"
+
+# 上面这些是渲染器内部占位符，用户输入里出现的一律视为伪造，渲染入口直接剥掉。
+# 不剥就能在链接 / 图片的属性位置引用 token，回填时闭合引号 → 属性注入 XSS。
+_TOKEN_CHARS = re.compile("[\uE000-\uE007]")
 
 # ----------------------------------------------------------------------
 # 行级语法
@@ -1130,10 +1144,13 @@ def md_render(content, strict=False):
     """整篇 Markdown + LaTeX -> 安全 HTML（数学留 span 由前端 KaTeX 渲染）。
 
     strict=True 用于评论等访客可写内容：禁站外图片、强制 rel、收紧类名。
+
+    入口先把用户输入里的代理字符（\uE000~\uE007）删掉：它们是渲染器的内部占位符，
+    留在正文里就能在属性位置引用 token，由 _restore() 回填时闭合引号 → 属性注入 XSS。
     """
     if not content:
         return ""
-    text = content.replace("\r\n", "\n").replace("\r", "\n")
+    text = _TOKEN_CHARS.sub("", content.replace("\r\n", "\n").replace("\r", "\n"))
 
     hstore = _TokenStore()
     md_text = _split_containers(text, hstore, strict=strict)

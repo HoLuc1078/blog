@@ -13,7 +13,7 @@ Flask + SQLite 个人博客：
   - 首页的「不显示…」过滤、按标签筛选、翻页与每页篇数全部在前端完成（不发请求）
   - 草稿：编辑页可存草稿（status=draft），游客完全看不到，只在顶栏的「草稿箱」里管理
   - 发布页参考洛谷文章编辑器：全屏 + 右侧 sidebar-container 文章设置
-  - 监听 0.0.0.0:8848
+  - 监听 0.0.0.0:8848；调试模式**默认开**（改代码自动重载），用 DEBUG=0 关掉
 """
 
 import hmac
@@ -52,6 +52,11 @@ AVATAR_SIZE = 256
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8848"))
 
+# 调试开关：**默认开**（改代码自动重载、出错页显示完整堆栈）。要关掉就设环境变量
+# DEBUG=0 / false / no / off（大小写不敏感，两侧空格无所谓）；不设这个变量，
+# 或者设成别的值，都算开。线上部署务必 DEBUG=0。
+DEBUG = (os.environ.get("DEBUG") or "1").strip().lower() not in ("0", "false", "no", "off")
+
 # 反向代理：默认**不信任** X-Forwarded-For。该头可被任何人伪造，一旦采信，
 # 解锁限流 / 评论限流全部失效（可无限爆破站长口令）。只有部署在自有反代
 # 之后才设 TRUST_PROXY=1，并用 PROXY_HOPS 声明可信代理的跳数。
@@ -79,8 +84,9 @@ CAPTCHA_TTL = 5 * 60
 CAPTCHA_LEN = 4
 CAPTCHA_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # 去掉易混的 0/O/1/I/L
 COMMENT_COOLDOWN = 15          # 同一浏览器两次评论间隔（秒）
-COMMENT_RATE = (20, 600)       # 同一 IP：10 分钟最多 20 条
+COMMENT_RATE = (20, 600)       # 同一 IP：10 分钟最多 20 次提交尝试（验证码答错也计数）
 UNLOCK_RATE = (8, 600)         # 同一 IP：10 分钟最多 8 次口令尝试
+CAPTCHA_RATE = (60, 600)       # 同一 IP：10 分钟最多领 60 张验证码图（PIL 逐像素画图不便宜）
 
 MAX_UPLOAD = 8 * 1024 * 1024
 
@@ -821,6 +827,13 @@ def captcha_png(text, w=136, h=46):
 
 @app.route("/captcha.png")
 def captcha_image():
+    # 这是唯一一个谁都调得动、又要跑 PIL 逐像素画图的接口，必须限流，而且放在最前面
+    # ——被限流时连图都不画。注意不覆盖会话里已有的 token：之前领到的那张仍然可用。
+    if not rate_ok("captcha", ip_of(), *CAPTCHA_RATE):
+        resp = make_response("验证码请求过于频繁，请稍后再试", 429)
+        resp.headers["Content-Type"] = "text/plain; charset=utf-8"
+        resp.headers["Retry-After"] = "60"
+        return resp
     code = captcha_code()
     session["captcha"] = captcha_issue(code)
     resp = make_response(captcha_png(code))
@@ -1141,10 +1154,12 @@ def add_comment(aid):
         err = "name"
     elif not content or len(content) > MAX_COMMENT:
         err = "content"
-    elif not captcha_ok(captcha):
-        err = "captcha"
+    # 限流必须排在验证码前面。captcha_ok() 是「答对才通过」，把它放前面等于
+    # 完全不限制尝试次数：答错的请求一条都不计数，刷验证码 / 爆破都是免费通道。
     elif not rate_ok("cmt", ip_of(), *COMMENT_RATE):
         err = "rate"
+    elif not captcha_ok(captcha):
+        err = "captcha"
     else:
         last = session.get("last_cmt", 0)
         if time.time() - float(last) < COMMENT_COOLDOWN:
@@ -1359,12 +1374,28 @@ def server_error(e):
 # ----------------------------------------------------------------------
 # 安全响应头
 # ----------------------------------------------------------------------
+def _csp_nonce():
+    """每个请求一个 nonce，让 script-src 不必再挂 'unsafe-inline'。
+
+    页首那段「先把主题写进 <html>、再加载 CSS」的内联脚本必须留在 HTML 里（外链会闪
+    主题），所以用 nonce 单独放行它。同一个请求内 nonce 只生成一次（存在 g 上），
+    after_request 写头时取到的就是模板里用的那一个。
+    """
+    nonce = getattr(g, "csp_nonce", None)
+    if not nonce:
+        nonce = secrets.token_urlsafe(16)
+        g.csp_nonce = nonce
+    return nonce
+
+
+app.jinja_env.globals["csp_nonce"] = _csp_nonce
+
 CSP = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-    "img-src 'self' data: https: http:; "   # 站外图片要等用户点击后才会加载，
-                                             # 这里必须放行，否则点了也出不来
+    "img-src 'self' data: https: http:; "   # 正文里的站外图片要能直接显示；
+                                             # 评论走严格净化，站外图是点击后才加载
     "font-src 'self' data: https://cdn.jsdelivr.net; "
     "connect-src 'self'; "
     "object-src 'none'; base-uri 'none'; form-action 'self'; "
@@ -1395,7 +1426,8 @@ def _security_headers(resp):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("X-Frame-Options", "DENY")          # 防点击劫持
     resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("Content-Security-Policy",
+                           CSP.format(nonce=_csp_nonce()))
     if request_is_https():
         resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return resp
@@ -1404,9 +1436,10 @@ def _security_headers(resp):
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
     init_db()
-    print(f"Petal Blog: http://{HOST}:{PORT}", flush=True)
+    print(f"Petal Blog: http://{HOST}:{PORT}  (debug={'on' if DEBUG else 'off'})",
+          flush=True)
     with app.app_context():
         if not has_owner_pass():
             print(f"[提示] 还没设置站长口令：打开 http://127.0.0.1:{PORT}/admin 设置后即可写文章",
                   flush=True)
-    app.run(host=HOST, port=PORT, debug=True, threaded=True)
+    app.run(host=HOST, port=PORT, debug=DEBUG, threaded=True)
