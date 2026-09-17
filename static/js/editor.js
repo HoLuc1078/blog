@@ -48,7 +48,7 @@
       del.title = "移除";
       del.setAttribute("aria-label", "移除标签 " + t);
       del.innerHTML = '<svg class="icon" aria-hidden="true" focusable="false">' +
-        '<use href="#icon-close" xlink:href="#icon-close"></use></svg>';
+        '<use href="#icon-close"></use></svg>';
       del.addEventListener("click", function () {
         tags = tags.filter(function (x) { return x !== t; });
         renderTags();
@@ -93,7 +93,7 @@
     });
   }
 
-  /* ---------- 文章图标（iconfont 那整套 + 自绘的 5 个：可搜索、可随机） ---------- */
+  /* ---------- 文章图标（27 个本地自绘 + iconfont 那整套：可搜索、可随机） ---------- */
   var iconPicks = [].slice.call(document.querySelectorAll("#edIconPicks .icon-pick"));
   var iconSearchEl = $("edIconSearch");
   var iconCountEl = $("edIconCount");
@@ -233,8 +233,6 @@
       if (Array.isArray(d.tags)) {
         tags = d.tags.filter(function (s) { return typeof s === "string" && s; })
           .slice(0, MAX_TAGS);
-      } else if (typeof d.cat === "string" && d.cat) {   // 兼容旧本地草稿
-        tags = [d.cat];
       }
       renderTags();
       if (pinEl) pinEl.value = d.pin || "0";
@@ -307,8 +305,6 @@
   function clearLocalDraft() {
     try {
       localStorage.removeItem(DRAFT_KEY);
-      localStorage.removeItem("petal.draft.new");
-      if (aid) localStorage.removeItem("petal.draft." + aid);
     } catch (e) { /* ignore */ }
   }
 

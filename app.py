@@ -43,7 +43,6 @@ import theme
 # ----------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "blog.db")
-UPLOAD_DIR = os.path.join(BASE_DIR, "static", "uploads")
 SECRET_FILE = os.path.join(BASE_DIR, ".secret_key")
 BG_PATH = os.path.join(BASE_DIR, "static", "bg.jpg")
 AVATAR_PATH = os.path.join(BASE_DIR, "static", "avatar.png")     # 头像固定这一个文件，上传即覆盖
@@ -83,7 +82,6 @@ COMMENT_COOLDOWN = 15          # 同一浏览器两次评论间隔（秒）
 COMMENT_RATE = (20, 600)       # 同一 IP：10 分钟最多 20 条
 UNLOCK_RATE = (8, 600)         # 同一 IP：10 分钟最多 8 次口令尝试
 
-ALLOWED_IMG = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 MAX_UPLOAD = 8 * 1024 * 1024
 
 # 文章标签（编辑页三个选框；首页可勾选"不显示…"并可按标签筛选，全部在前端完成）
@@ -100,11 +98,20 @@ ST_PUBLISHED = "published"
 ST_DRAFT = "draft"
 
 # 文章标题前的 svg 图标（洛谷式的 <svg class="icon"><use href="#…"></use></svg>）
-#   · 站内自绘的 5 个定义在 templates/icons.html 里（页面总会内联，老文章存的就是这些名字）；
-#   · 其余来自 static/icons.svg —— yc-lain 博客那套 iconfont 的 404 个图标，
-#     由 gen_icons.py 生成；编辑器选择器直接 <use href="/static/icons.svg#ic-x"> 引用，
+#   · LOCAL_ICONS：站内自绘、定义在 templates/icons.html、随每个页面内联的一组
+#     （24 个水果 + 樱花 / 彩虹 / 四叶草），在图标选择器里排最前；
+#   · 其余 380 个来自 static/icons.svg —— yc-lain 博客那套 iconfont（ic- 前缀），
+#     编辑器选择器直接 <use href="/static/icons.svg#ic-x"> 引用，
 #     文章页只把用到的那一两个 <symbol> 内联进页面（见 post_icon_sprites）。
-SITE_ICONS = ["icon-lizi", "icon-peach", "icon-sakura", "icon-rainbow", "icon-clover"]
+FRUIT_ICONS = [
+    "icon-caomei", "icon-boluo", "icon-huolongguo", "icon-chengzi", "icon-hamigua",
+    "icon-lizhi", "icon-mangguo", "icon-liulian", "icon-lizi", "icon-lanmei",
+    "icon-longyan", "icon-shanzhu", "icon-pingguo", "icon-mihoutao", "icon-niuyouguo",
+    "icon-xigua", "icon-putao", "icon-xiangjiao", "icon-ningmeng", "icon-yingtao",
+    "icon-taozi", "icon-shiliu", "icon-ximei", "icon-shizi",
+]
+LOCAL_ICONS = FRUIT_ICONS + ["icon-sakura", "icon-rainbow", "icon-clover"]
+DEFAULT_ICON = "icon-sakura"        # 没选图标的文章统一显示它
 ICON_SPRITE = os.path.join(BASE_DIR, "static", "icons.svg")
 _ICON_CACHE = {"mtime": None, "map": {}, "names": ()}
 _SYMBOL_RE = re.compile(r'<symbol\b[^>]*\bid="([^"]+)"[^>]*>.*?</symbol>', re.S)
@@ -115,7 +122,6 @@ _SYMBOL_RE = re.compile(r'<symbol\b[^>]*\bid="([^"]+)"[^>]*>.*?</symbol>', re.S)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    author_id   INTEGER NOT NULL DEFAULT 0,
     title       TEXT NOT NULL,
     summary     TEXT NOT NULL DEFAULT '',
     content_md  TEXT NOT NULL DEFAULT '',
@@ -131,7 +137,6 @@ CREATE TABLE IF NOT EXISTS articles (
 CREATE TABLE IF NOT EXISTS comments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     article_id  INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    user_id     INTEGER,
     parent_id   INTEGER NOT NULL DEFAULT 0,
     author_name TEXT NOT NULL DEFAULT '',
     ip          TEXT NOT NULL DEFAULT '',
@@ -195,7 +200,6 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
     MAX_CONTENT_LENGTH=16 * 1024 * 1024,
 )
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @app.teardown_appcontext
@@ -206,89 +210,11 @@ def _close_db(exc):
 
 
 def init_db():
+    """建表（幂等）。老库的历史结构升级见 migrate.py。"""
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
-    _migrate(conn)
     conn.commit()
     conn.close()
-
-
-def _migrate(conn):
-    """老库平滑升级（不动用户已有内容）。"""
-    def cols(table):
-        return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
-
-    a_cols = cols("articles")
-    if "tags" not in a_cols:
-        conn.execute("ALTER TABLE articles ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
-        if "category" in a_cols:      # 老库的单个「分类」→ 标签列表，内容不丢
-            conn.execute("UPDATE articles SET tags=TRIM(category) "
-                         "WHERE TRIM(category)<>''")
-    if "pin" not in a_cols:
-        conn.execute("ALTER TABLE articles ADD COLUMN pin INTEGER NOT NULL DEFAULT 0")
-    if "status" not in a_cols:
-        conn.execute("ALTER TABLE articles ADD COLUMN status TEXT NOT NULL DEFAULT 'published'")
-    if "flags" not in a_cols:
-        conn.execute("ALTER TABLE articles ADD COLUMN flags TEXT NOT NULL DEFAULT ''")
-    if "icon" not in a_cols:
-        conn.execute("ALTER TABLE articles ADD COLUMN icon TEXT NOT NULL DEFAULT ''")
-
-    # 评论：从「登录用户」改为「名字 + 图形验证码」，把旧账号名搬进 author_name
-    c_cols = cols("comments")
-    if c_cols and "author_name" not in c_cols:
-        has_users = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
-        src = ("COALESCE((SELECT username FROM users u WHERE u.id=c.user_id), '访客')"
-               if has_users else "'访客'")
-        conn.executescript(f"""
-        DROP TABLE IF EXISTS comments_old;
-        ALTER TABLE comments RENAME TO comments_old;
-        CREATE TABLE comments (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            article_id  INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-            user_id     INTEGER,
-            parent_id   INTEGER NOT NULL DEFAULT 0,
-            author_name TEXT NOT NULL DEFAULT '',
-            ip          TEXT NOT NULL DEFAULT '',
-            content     TEXT NOT NULL,
-            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        INSERT INTO comments(id, article_id, user_id, parent_id, author_name, content, created_at)
-            SELECT c.id, c.article_id, c.user_id, 0, {src}, c.content, c.created_at
-            FROM comments_old c;
-        DROP TABLE comments_old;
-        CREATE INDEX IF NOT EXISTS idx_comments_article ON comments(article_id);
-        """)
-
-    # 评论回复：parent_id（0 = 顶层评论）
-    c2_cols = cols("comments")
-    if c2_cols and "parent_id" not in c2_cols:
-        conn.execute("ALTER TABLE comments ADD COLUMN parent_id INTEGER NOT NULL DEFAULT 0")
-
-    # 已废弃的表 / 配置：邮箱验证码、收藏、头像路径（头像改为固定文件 static/avatar.png）
-    conn.execute("DROP TABLE IF EXISTS email_codes")
-    conn.execute("DROP TABLE IF EXISTS favorites")
-    conn.execute("DELETE FROM site_cfg WHERE key='author_avatar'")
-
-    # 老头像（static/uploads/xxx.png）搬到固定文件，别让已上传的头像丢了
-    if not os.path.exists(AVATAR_PATH) and os.path.isdir(UPLOAD_DIR):
-        cands = []
-        for fn in os.listdir(UPLOAD_DIR):
-            if os.path.splitext(fn)[1].lower() in ALLOWED_IMG:
-                p = os.path.join(UPLOAD_DIR, fn)
-                try:
-                    cands.append((os.path.getmtime(p), p))
-                except OSError:
-                    pass
-        if cands:
-            cands.sort(reverse=True)
-            try:
-                from PIL import Image
-                _write_avatar(Image.open(cands[0][1]))
-                for _, p in cands:
-                    os.remove(p)
-            except Exception:
-                pass
 
 
 # ----------------------------------------------------------------------
@@ -431,40 +357,37 @@ def _icon_sprite():
 
 
 def post_icons():
-    """图标选择器里的全部图标：自绘的 5 个排前面，后面是 iconfont 那整套。"""
+    """图标选择器里的全部图标：本地自绘的 27 个排前面，后面是 iconfont 那整套。"""
     sprite = _icon_sprite()
-    return SITE_ICONS + [n for n in sprite if n not in SITE_ICONS]
+    return LOCAL_ICONS + [n for n in sprite if n not in LOCAL_ICONS]
 
 
 def clean_icon(value):
-    """只接受存在的图标名，其余（含空）→ 空串，表示按 id 自动分配。"""
+    """只接受存在的图标名，其余（含空）→ 空串，表示用默认图标。"""
     v = (value or "").strip() if isinstance(value, str) else ""
     if not v:
         return ""
-    return v if (v in SITE_ICONS or v in _icon_sprite()) else ""
+    return v if (v in LOCAL_ICONS or v in _icon_sprite()) else ""
 
 
 def post_icon(post):
-    """文章标题前的 svg 图标：用文章自己选的；没选就按 id 在自绘的 5 个里稳定分配。
+    """文章标题前的 svg 图标：用文章自己选的；没选（或名字已失效）就用默认图标。
 
-    传文章 dict / sqlite3.Row，也兼容直接传 id。
+    传文章 dict / sqlite3.Row，也兼容直接传 id，以及 None（取默认图标）。
     """
-    icon, aid = "", post
+    icon = ""
     if isinstance(post, dict):
-        icon, aid = post.get("icon") or "", post.get("id")
+        icon = post.get("icon") or ""
     elif isinstance(post, sqlite3.Row):
-        icon, aid = (post["icon"] if "icon" in post.keys() else "") or "", post["id"]
-    if icon in SITE_ICONS or icon in _icon_sprite():
+        icon = (post["icon"] if "icon" in post.keys() else "") or ""
+    if icon in LOCAL_ICONS or icon in _icon_sprite():
         return icon
-    try:
-        return SITE_ICONS[int(aid) % len(SITE_ICONS)]
-    except (TypeError, ValueError):
-        return SITE_ICONS[0]
+    return DEFAULT_ICON
 
 
 def post_icon_ref(name):
-    """<use> 该指向哪里：自绘的在页面内联 sprite 里，iconfont 的在 static/icons.svg 里。"""
-    if name in SITE_ICONS or name not in _icon_sprite():
+    """<use> 该指向哪里：本地自绘的在本页内联 sprite 里，iconfont 的在 static/icons.svg 里。"""
+    if name in LOCAL_ICONS or name not in _icon_sprite():
         return "#" + name
     return "/static/icons.svg#" + name
 
@@ -472,14 +395,14 @@ def post_icon_ref(name):
 def post_icon_sprites(posts):
     """把这一页用到的 iconfont 图标内联成 <symbol>（同名只出现一次）。
 
-    自绘的 5 个已经在 templates/icons.html 里了，这里跳过（否则 id 会重复）；
-    这样文章页为了图标不需要额外拉 1.2MB 的 sprite。
+    本地自绘的 27 个已经在 templates/icons.html 里了，这里跳过（否则 id 会重复）；
+    这样文章页为了图标不需要额外拉 700KB 的 sprite。
     """
     sprite = _icon_sprite()
     need, seen = [], set()
     for p in posts or []:
         name = post_icon(p)
-        if name in seen or name in SITE_ICONS or name not in sprite:
+        if name in seen or name in LOCAL_ICONS or name not in sprite:
             continue
         seen.add(name)
         need.append(sprite[name])
@@ -550,12 +473,9 @@ def tag_list(csv_text):
 def all_tags(limit=50):
     """所有已发布文章用过的标签 + 篇数（按篇数降序、名字升序）。"""
     counts = {}
-    try:
-        rows = _db().execute(
-            "SELECT tags FROM articles WHERE status=? AND TRIM(tags)<>''",
-            (ST_PUBLISHED,)).fetchall()
-    except Exception:
-        return []
+    rows = _db().execute(
+        "SELECT tags FROM articles WHERE status=? AND TRIM(tags)<>''",
+        (ST_PUBLISHED,)).fetchall()
     for r in rows:
         for t in tag_list(r["tags"]):
             counts[t] = counts.get(t, 0) + 1
@@ -569,7 +489,7 @@ app.jinja_env.globals["MAX_TAG_LEN"] = MAX_TAG_LEN
 
 
 def is_draft(row):
-    return (row["status"] if "status" in row.keys() else ST_PUBLISHED) == ST_DRAFT
+    return row["status"] == ST_DRAFT
 
 
 # ---- 主体色 ----
@@ -632,13 +552,6 @@ def _write_avatar(img):
     img = img.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
     img = img.resize((AVATAR_SIZE, AVATAR_SIZE), Image.LANCZOS)
     img.save(AVATAR_PATH, "PNG", optimize=True)
-    for ext in (".jpg", ".jpeg", ".gif", ".webp", ".svg"):
-        old = os.path.join(BASE_DIR, "static", "avatar" + ext)
-        if os.path.exists(old):
-            try:
-                os.remove(old)
-            except OSError:
-                pass
     return AVATAR_PATH
 
 
@@ -722,24 +635,22 @@ def check_owner_pass(pw):
 
 @app.context_processor
 def inject_globals():
-    stats = {"articles": 0, "comments": 0, "views": 0}
-    recent = []
-    try:
-        db = _db()
-        stats["articles"] = db.execute(
-            "SELECT COUNT(*) c FROM articles WHERE status=?", (ST_PUBLISHED,)).fetchone()["c"]
-        stats["comments"] = db.execute(
+    db = _db()
+    stats = {
+        "articles": db.execute(
+            "SELECT COUNT(*) c FROM articles WHERE status=?",
+            (ST_PUBLISHED,)).fetchone()["c"],
+        "comments": db.execute(
             "SELECT COUNT(*) c FROM comments WHERE article_id IN "
-            "(SELECT id FROM articles WHERE status=?)", (ST_PUBLISHED,)).fetchone()["c"]
-        stats["views"] = db.execute(
+            "(SELECT id FROM articles WHERE status=?)", (ST_PUBLISHED,)).fetchone()["c"],
+        "views": db.execute(
             "SELECT COALESCE(SUM(views),0) v FROM articles WHERE status=?",
-            (ST_PUBLISHED,)).fetchone()["v"]
-        recent = [dict(r) for r in db.execute(
-            "SELECT id, title FROM articles WHERE status=? "
-            "ORDER BY pin DESC, created_at DESC, id DESC LIMIT 6", (ST_PUBLISHED,)
-        ).fetchall()]
-    except Exception:
-        pass
+            (ST_PUBLISHED,)).fetchone()["v"],
+    }
+    recent = [dict(r) for r in db.execute(
+        "SELECT id, title FROM articles WHERE status=? "
+        "ORDER BY pin DESC, created_at DESC, id DESC LIMIT 6", (ST_PUBLISHED,)
+    ).fetchall()]
     unlocked = owner_unlocked()
     return {
         "is_owner": unlocked,
@@ -1078,15 +989,6 @@ def _created_error(data):
     return None
 
 
-def _legacy_owner_id():
-    """老库 articles.author_id 仍带 users 外键：用一个已存在的作者 id 占位（新库为 0）。"""
-    try:
-        row = _db().execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
-        return row["id"] if row else 0
-    except Exception:
-        return 0
-
-
 @app.route("/write", methods=["GET", "POST"])
 def write_article():
     gate = _required_owner()
@@ -1107,9 +1009,9 @@ def write_article():
             return render_template("editor.html", error=err, post=draft)
         db = get_db()
         cur = db.execute(
-            "INSERT INTO articles(author_id, title, summary, content_md, tags, pin, "
-            "status, flags, icon, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-            (_legacy_owner_id(), data["title"], data["summary"][:300], data["content"],
+            "INSERT INTO articles(title, summary, content_md, tags, pin, "
+            "status, flags, icon, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (data["title"], data["summary"][:300], data["content"],
              data["tags"], data["pin"], data["status"], data["flags"], data["icon"],
              data["created_utc"] or now_str(), now_str()),
         )
@@ -1250,8 +1152,8 @@ def add_comment(aid):
     if err:
         return back(err)
     db.execute(
-        "INSERT INTO comments(article_id, user_id, parent_id, author_name, ip, content) "
-        "VALUES(?,0,?,?,?,?)",
+        "INSERT INTO comments(article_id, parent_id, author_name, ip, content) "
+        "VALUES(?,?,?,?,?)",
         (aid, parent_id, name, ip_of(), content),
     )
     db.commit()

@@ -17,7 +17,7 @@
         <article class="post-card">
           <div class="post-head">
             <a class="post-title" href="/a/{{ p.id }}/edit">
-              <svg class="icon post-icon" aria-hidden="true" focusable="false"><use href="#{{ post_icon(p) }}" xlink:href="#{{ post_icon(p) }}"></use></svg>
+              <svg class="icon post-icon" aria-hidden="true" focusable="false"><use href="#{{ post_icon(p) }}"></use></svg>
               <span class="post-title-text">{{ p.title }}</span>
             </a>
             {% for t in p.tags %}<span class="cat-tag">{{ t }}</span>{% endfor %}

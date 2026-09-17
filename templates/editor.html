@@ -85,13 +85,12 @@
           {% for ic in all_icons %}
           <button type="button" class="icon-pick" data-icon="{{ ic }}"
                   title="{{ ic }}" aria-label="{{ ic }}">
-            <svg class="icon" aria-hidden="true" focusable="false"><use href="{{ post_icon_ref(ic) }}" xlink:href="{{ post_icon_ref(ic) }}"></use></svg>
+            <svg class="icon" aria-hidden="true" focusable="false"><use href="{{ post_icon_ref(ic) }}"></use></svg>
           </button>
           {% endfor %}
         </div>
         <div class="icon-count dim small" id="edIconCount">共 {{ all_icons | length }} 个图标</div>
-        <input type="hidden" id="edIcon"
-               value="{{ post_icon(post) if post else all_icons[0] }}">
+        <input type="hidden" id="edIcon" value="{{ post_icon(post) }}">
 
         <h4 class="side-title">置顶量</h4>
         <input type="number" id="edPin" min="0" max="999" step="1"

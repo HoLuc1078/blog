@@ -30,14 +30,14 @@
       </a>
       <nav class="top-actions">
       <div class="theme-picker" role="group" aria-label="主题">
-        <button type="button" class="theme-btn" data-theme-set="light" title="浅色" aria-label="浅色"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-sun" xlink:href="#icon-sun"></use></svg></button>
-        <button type="button" class="theme-btn" data-theme-set="care" title="护眼" aria-label="护眼"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-eye" xlink:href="#icon-eye"></use></svg></button>
+        <button type="button" class="theme-btn" data-theme-set="light" title="浅色" aria-label="浅色"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-sun"></use></svg></button>
+        <button type="button" class="theme-btn" data-theme-set="care" title="护眼" aria-label="护眼"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-eye"></use></svg></button>
         <span class="care-range"><input type="range" id="careRange" min="10" max="85" step="1" value="52" aria-label="护眼强度"></span>
-        <button type="button" class="theme-btn" data-theme-set="dark" title="暗黑" aria-label="暗黑"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-moon" xlink:href="#icon-moon"></use></svg></button>
+        <button type="button" class="theme-btn" data-theme-set="dark" title="暗黑" aria-label="暗黑"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-moon"></use></svg></button>
       </div>
         {% if is_owner %}
         <a class="top-link" href="/drafts">草稿箱{% if draft_n %} ({{ draft_n }}){% endif %}</a>
-        <a class="btn btn-primary" href="/write"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-pen" xlink:href="#icon-pen"></use></svg>写文章</a>
+        <a class="btn btn-primary" href="/write"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-pen"></use></svg>写文章</a>
         {% endif %}
       </nav>
     </div>

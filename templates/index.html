@@ -40,7 +40,7 @@
                  data-tags="{{ p.tags | join(',') }}">
           <div class="post-head">
             <a class="post-title" href="/a/{{ p.id }}">
-              <svg class="icon post-icon" aria-hidden="true" focusable="false"><use href="#{{ post_icon(p) }}" xlink:href="#{{ post_icon(p) }}"></use></svg>
+              <svg class="icon post-icon" aria-hidden="true" focusable="false"><use href="#{{ post_icon(p) }}"></use></svg>
               <span class="post-title-text">{{ p.title }}</span>
             </a>
             {% if p.pin %}<span class="pin-badge">置顶{% if is_owner %}<b>{{ p.pin }}</b>{% endif %}</span>{% endif %}

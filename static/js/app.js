@@ -107,16 +107,6 @@
     }, true);
   }
 
-  /* ---------- 头像加载兜底：图挂了就隐藏（已无默认头像图） ---------- */
-  function bindAvatarFallback() {
-    document.addEventListener("error", function (e) {
-      var t = e.target;
-      if (t && t.tagName === "IMG" && t.classList && t.classList.contains("author-avatar")) {
-        t.hidden = true;
-      }
-    }, true);
-  }
-
   /* ---------- 图形验证码：点击换一张 ---------- */
   function bindCaptcha() {
     var img = $("#captchaImg");
@@ -176,7 +166,7 @@
         'placeholder="网址" value="' + esc(url) + '">' +
         '<button type="button" class="ae-link-del" title="移除" aria-label="移除">' +
         '<svg class="icon" aria-hidden="true" focusable="false">' +
-        '<use href="#icon-close" xlink:href="#icon-close"></use></svg></button>';
+        '<use href="#icon-close"></use></svg></button>';
       $("#aeLinks").appendChild(row);
     }
     $("#aeAddLink").addEventListener("click", function () { addRow("", ""); });
@@ -328,7 +318,6 @@
   /* ---------- 启动 ---------- */
   function init() {
     bindConfirms();
-    bindAvatarFallback();
     bindTheme();
     bindCare();
     bindCaptcha();
