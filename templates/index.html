@@ -35,15 +35,16 @@
 
       <div class="post-list" id="postList">
         {% for p in posts %}
-        <article class="post-card{% if p.pin %} pinned{% endif %}"
+        <article class="post-card{% if p.pin > 0 %} pinned{% endif %}"
                  data-flags="{{ p.flag_keys | join(',') }}"
-                 data-tags="{{ p.tags | join(',') }}">
+                 data-tags="{{ p.tags | join(',') }}"
+                 data-pin="{{ p.pin }}">
           <div class="post-head">
             <a class="post-title" href="/a/{{ p.id }}">
               <svg class="icon post-icon" aria-hidden="true" focusable="false"><use href="#{{ post_icon(p) }}"></use></svg>
               <span class="post-title-text">{{ p.title }}</span>
             </a>
-            {% if p.pin %}<span class="pin-badge">置顶{% if is_owner %}<b>{{ p.pin }}</b>{% endif %}</span>{% endif %}
+            <span class="pin-badge{% if p.pin <= 0 %} pin-low{% endif %}" title="置顶量">置顶 <b>{{ p.pin }}</b></span>
             {% for t in p.tags %}
             <a class="cat-tag" href="/?tag={{ t | urlencode }}">{{ t }}</a>
             {% endfor %}
@@ -62,7 +63,10 @@
       </div>
 
       <div class="list-empty" id="listEmpty" hidden>
-        <div class="empty-icon"><img src="/static/sakura.svg" alt="" aria-hidden="true"></div>
+        <div class="empty-icon">
+          <img class="theme-light-only" src="/static/sakura.svg" alt="" aria-hidden="true">
+          <img class="theme-dark-only" src="/static/sakura-dark.svg" alt="" aria-hidden="true">
+        </div>
         <p>没有符合条件的文章</p>
       </div>
 
@@ -78,7 +82,10 @@
 
       {% else %}
       <div class="empty-card">
-        <div class="empty-icon"><img src="/static/sakura.svg" alt="" aria-hidden="true"></div>
+        <div class="empty-icon">
+          <img class="theme-light-only" src="/static/sakura.svg" alt="" aria-hidden="true">
+          <img class="theme-dark-only" src="/static/sakura-dark.svg" alt="" aria-hidden="true">
+        </div>
         <p>还没有文章。</p>
         {% if is_owner %}<a class="btn btn-primary" href="/write">写第一篇</a>{% endif %}
       </div>

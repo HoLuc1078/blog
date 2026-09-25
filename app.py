@@ -55,7 +55,7 @@ PORT = int(os.environ.get("PORT", "8848"))
 # 调试开关：**默认开**（改代码自动重载、出错页显示完整堆栈）。要关掉就设环境变量
 # DEBUG=0 / false / no / off（大小写不敏感，两侧空格无所谓）；不设这个变量，
 # 或者设成别的值，都算开。线上部署务必 DEBUG=0。
-DEBUG = (os.environ.get("DEBUG") or "1").strip().lower() not in ("0", "false", "no", "off")
+DEBUG = (os.environ.get("DEBUG") or "0").strip().lower() not in ("0", "false", "no", "off")
 
 # 反向代理：默认**不信任** X-Forwarded-For。该头可被任何人伪造，一旦采信，
 # 解锁限流 / 评论限流全部失效（可无限爆破站长口令）。只有部署在自有反代
@@ -76,6 +76,8 @@ MAX_COMMENT = 5000
 MAX_NAME = 20
 MAX_BIO = 2000
 MAX_LINKS = 20
+PIN_MIN = -999
+PIN_MAX = 999
 MIN_OWNER_PASS = 6
 MAX_OWNER_PASS = 72
 
@@ -286,8 +288,22 @@ def cfg_set(key, value):
     _db().commit()
 
 
+def _ensure_contacts_split():
+    """一次性迁移：老库里 author_links 放的是个人链接（Github / 洛谷 等），
+    现在拆成独立的「联系方式」，author_links 从此只放友链。
+    用 contacts_split 标记保证只跑一次；不覆盖已有的 author_contacts。"""
+    if cfg_get("contacts_split", "") == "1":
+        return
+    if cfg_get("author_contacts", None) is None:
+        # 只有真的把旧内容搬过去时才清空 author_links，避免误伤已单独存在的友链
+        cfg_set("author_contacts", cfg_get("author_links", "[]") or "[]")
+        cfg_set("author_links", "[]")
+    cfg_set("contacts_split", "1")
+
+
 def load_cfg():
-    """站点配置快照（含解析好的链接列表）。"""
+    """站点配置快照（含解析好的联系方式与友链）。"""
+    _ensure_contacts_split()
     cfg = {
         "site_title": cfg_get("site_title", "樱羽小筑"),
         "site_subtitle": cfg_get("site_subtitle", "花见之时 · 记录代码与生活"),
@@ -297,6 +313,7 @@ def load_cfg():
         "footer_text": cfg_get("footer_text", ""),
     }
     cfg["author_links"] = _parse_links(cfg_get("author_links", "[]"))
+    cfg["author_contacts"] = _parse_links(cfg_get("author_contacts", "[]"))
     return cfg
 
 
@@ -983,7 +1000,7 @@ def _to_pin(value):
         n = int(str(value or "0").strip() or 0)
     except (TypeError, ValueError):
         return 0
-    return max(0, min(999, n))
+    return max(PIN_MIN, min(PIN_MAX, n))   # 置顶量可正可负：负数把文章压到后面
 
 
 def _validate_article(title, content, status=ST_PUBLISHED):
@@ -1292,18 +1309,29 @@ def api_site():
         put("author_bio", payload.get("author_bio"), MAX_BIO)
     if "footer_text" in payload:
         put("footer_text", payload.get("footer_text"), 200)
+    warns = []
     if "links" in payload:
         links = payload.get("links")
         if not isinstance(links, list) or len(links) > MAX_LINKS:
-            return jsonify(error=f"链接最多 {MAX_LINKS} 条"), 400
+            return jsonify(error=f"友链最多 {MAX_LINKS} 条"), 400
         clean, skipped = clean_links(links)
         cfg_set("author_links", json.dumps(clean, ensure_ascii=False))
         upd.append("links")
         if skipped:
-            return jsonify(ok=True, updated=upd,
-                           warn=f"{skipped} 条链接已忽略")
+            warns.append(f"{skipped} 条友链已忽略")
+    if "contacts" in payload:
+        contacts = payload.get("contacts")
+        if not isinstance(contacts, list) or len(contacts) > MAX_LINKS:
+            return jsonify(error=f"联系方式最多 {MAX_LINKS} 条"), 400
+        clean, skipped = clean_links(contacts)
+        cfg_set("author_contacts", json.dumps(clean, ensure_ascii=False))
+        upd.append("contacts")
+        if skipped:
+            warns.append(f"{skipped} 条联系方式已忽略")
     if not upd:
         return jsonify(error="没有可更新的字段"), 400
+    if warns:
+        return jsonify(ok=True, updated=upd, warn="；".join(warns))
     return jsonify(ok=True, updated=upd)
 
 

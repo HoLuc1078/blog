@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="草稿">
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#eef4fb"/>
+    </linearGradient>
+  </defs>
+  <path d="M14 6h24l14 14v38a4 4 0 0 1-4 4H14a4 4 0 0 1-4-4V10a4 4 0 0 1 4-4z"
+        fill="url(#paper)" stroke="#5b8fd0" stroke-width="2.4" stroke-linejoin="round"/>
+  <path d="M38 6v14h14" fill="#dbeafe" stroke="#5b8fd0" stroke-width="2.4" stroke-linejoin="round"/>
+  <g stroke="#6f9fd4" stroke-width="2.4" stroke-linecap="round">
+    <line x1="17" y1="30" x2="42" y2="30"/>
+    <line x1="17" y1="39" x2="47" y2="39"/>
+    <line x1="17" y1="48" x2="35" y2="48"/>
+  </g>
+</svg>

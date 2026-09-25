@@ -25,6 +25,18 @@
         <label>简介
           <textarea id="aeBio" rows="5" maxlength="2000">{{ site.author_bio }}</textarea>
         </label>
+
+        <h4>联系方式 · Contact</h4>
+        <div id="aeContacts" class="ae-links">
+          {% for c in site.author_contacts %}
+          <div class="ae-link-row">
+            <input type="text" class="ae-link-label" maxlength="30" placeholder="名称" value="{{ c.label }}">
+            <input type="text" class="ae-link-url" maxlength="2000" placeholder="网址" value="{{ c.url }}">
+            <button type="button" class="ae-link-del" title="移除" aria-label="移除"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-close"></use></svg></button>
+          </div>
+          {% endfor %}
+        </div>
+        <button type="button" class="btn small ghost" id="aeAddContact">＋ 添加联系方式</button>
       </div>
 
       <div class="form-col">
@@ -39,7 +51,7 @@
           <input type="text" id="aeFooterText" maxlength="200" value="{{ site.footer_text }}">
         </label>
 
-        <h4>Links · 链接</h4>
+        <h4>友链 · Links</h4>
         <div id="aeLinks" class="ae-links">
           {% for l in site.author_links %}
           <div class="ae-link-row">
@@ -49,7 +61,7 @@
           </div>
           {% endfor %}
         </div>
-        <button type="button" class="btn small ghost" id="aeAddLink">＋ 添加链接</button>
+        <button type="button" class="btn small ghost" id="aeAddLink">＋ 添加友链</button>
       </div>
     </div>
 

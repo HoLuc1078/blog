@@ -79,7 +79,7 @@ templates/           Jinja2 模板（服务端渲染；除 editor.html 外都 ex
                      图标搜索、存草稿）。逻辑在 static/js/editor.js。
   drafts.html        草稿箱：仅站长可见，列出草稿并可继续编辑 / 发布 / 删除。
   admin.html         管理入口 /admin：设口令 / 输口令解锁 / 改口令 / 锁定。
-  author_col.html    首页右侧作者栏（3:1 分栏的 1）：头像、昵称、简介、链接、数据统计。
+  author_col.html    首页右侧作者栏（3:1 分栏的 1）：头像、昵称、简介、联系方式、友链、数据统计。
   author_edit_modal.html  站长专用的「编辑作者栏 / 站点」弹窗（base.html 里按 is_owner 引入）。
   error.html         404 / 400 / 403 / 413 / 500 的统一样式错误页。
 
@@ -91,26 +91,28 @@ static/
   js/app.js          全站公共脚本：toast、带 CSRF 头的 fetch 封装、KaTeX 客户端渲染、
                      代码块复制、删除确认、作者栏编辑弹窗、验证码刷新、评论回复框。
   js/index.js        首页列表：过滤 / 标签筛选 / 翻页 / 每页篇数（**全部在前端做，零请求**）；
-                     选择存 localStorage。
+                     选择存 localStorage；多选标签时按命中标签数降序、再按置顶量降序重排。
   js/editor.js       编辑器逻辑：编辑-预览切换、快捷插入 Markdown 与 LaTeX、摘要、标签编辑、
                      图标搜索与随机、置顶量、发布时间、过滤标记、本地草稿、提交前校验。
   icons.svg          iconfont sprite：380 个 ic-* 图标（约 800KB）。编辑器图标选择器直接
                      <use href="/static/icons.svg#ic-x">；文章页只内联用到的那几个 <symbol>。
   bg.jpg             背景图（同时是 THEME_FROM_BG 取色来源）。
   avatar.png         博主头像：**固定就这一个文件**，上传即覆盖，不存路径。
-  favicon.svg        站点图标 + 顶栏 logo。
-  sakura.svg         空状态插画（首页无文章 / 筛选无结果）。
-  note.svg           草稿箱空状态插画。
+  favicon.svg        站点图标 + 顶栏 logo（favicon-dark.svg 是暗色主题的蓝色版）。
+  sakura.svg         空状态插画（首页无文章 / 筛选无结果；sakura-dark.svg 暗色蓝色版）。
+  note.svg           草稿箱空状态插画（note-dark.svg 暗色蓝色版）。
+                     三张 -dark 版由 CSS 的 .theme-light-only / .theme-dark-only 按 data-theme 切换。
 ```
 
 ## 4. 数据模型（`app.py` 里的 `SCHEMA`，启动时幂等建表）
 
 - **articles**：`id` / `title` / `summary` / `content_md` / `tags`（CSV，最多 12 个、每个 ≤20 字）/
-  `pin`（置顶量 0–999）/ `status`（`published` | `draft`）/ `flags`（CSV：unsafe, negative, nonacademic）/
+  `pin`（置顶量 -999–999，可为负数，越小越靠后）/ `status`（`published` | `draft`）/ `flags`（CSV：unsafe, negative, nonacademic）/
   `icon`（图标名，空 = 用默认 `icon-sakura`）/ `views` / `created_at` / `updated_at`。
 - **comments**：`id` / `article_id` / `parent_id`（0 = 顶层）/ `author_name` / `ip` / `content` / `created_at`。
   展示时由 `_thread_comments()` 拍平成「顶层 + 其下所有回复」两级。
-- **site_cfg**：键值表。站点标题 / 副标题 / 页脚 / 昵称 / 简介 / 链接 JSON / `owner_pass_hash`（站长口令哈希）。
+- **site_cfg**：键值表。站点标题 / 副标题 / 页脚 / 昵称 / 简介 / 联系方式 JSON（`author_contacts`）/ 友链 JSON（`author_links`）/
+  `contacts_split`（旧 author_links 拆到联系方式的一次性标记）/ `owner_pass_hash`（站长口令哈希）。
   忘记口令：删掉 `owner_pass_hash` 这一行即可重设。
 
 ## 5. 关键约定（改代码前先看）
@@ -120,6 +122,8 @@ static/
 2. **首页筛选 / 标签 / 翻页 / 每页篇数全在前端**（`static/js/index.js`）：服务端 `index()`
    一次把全部已发布文章给模板，之后不发任何请求。要加筛选维度就得同时改
    `index.html`（卡片上的 `data-*` 属性）和 `index.js`（`matches()` 等）。
+   多选标签时：命中标签数多的文章排前面，命中数相同再比置顶量；卡片上的置顶量
+   （`data-pin`，可为 0 / 负数）每篇都显示。
    「每页 N 篇」是数字输入框，范围 1–200，**没有"全部"这一档**；越界由 `clampPer()` 夹紧。
 3. **草稿对游客彻底隐身**：`status='draft'` 的文章游客打开链接直接 404，且不进任何列表 / 统计。
 4. **图标分两套**：本地自绘的 27 个（`LOCAL_ICONS`，定义在 `templates/icons.html`，用 `#名字` 引用）

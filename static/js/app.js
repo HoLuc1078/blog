@@ -156,25 +156,33 @@
     function esc(s) {
       return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     }
-    function addRow(label, url) {
-      var row = document.createElement("div");
-      row.className = "ae-link-row";
-      row.innerHTML =
-        '<input type="text" class="ae-link-label" maxlength="30" placeholder="名称" value="' +
-        esc(label) + '">' +
-        '<input type="text" class="ae-link-url" maxlength="2000" ' +
-        'placeholder="网址" value="' + esc(url) + '">' +
-        '<button type="button" class="ae-link-del" title="移除" aria-label="移除">' +
-        '<svg class="icon" aria-hidden="true" focusable="false">' +
-        '<use href="#icon-close"></use></svg></button>';
-      $("#aeLinks").appendChild(row);
-    }
-    $("#aeAddLink").addEventListener("click", function () { addRow("", ""); });
-    $("#aeLinks").addEventListener("click", function (e) {
-      if (e.target.classList && e.target.classList.contains("ae-link-del")) {
-        e.target.closest(".ae-link-row").remove();
+    /* 友链与联系方式的编辑列表结构一样，共用一套增删逻辑 */
+    function bindList(listSel, addSel) {
+      var listEl = $(listSel);
+      var addEl = $(addSel);
+      if (!listEl || !addEl) return;
+      function addRow(label, url) {
+        var row = document.createElement("div");
+        row.className = "ae-link-row";
+        row.innerHTML =
+          '<input type="text" class="ae-link-label" maxlength="30" placeholder="名称" value="' +
+          esc(label) + '">' +
+          '<input type="text" class="ae-link-url" maxlength="2000" ' +
+          'placeholder="网址" value="' + esc(url) + '">' +
+          '<button type="button" class="ae-link-del" title="移除" aria-label="移除">' +
+          '<svg class="icon" aria-hidden="true" focusable="false">' +
+          '<use href="#icon-close"></use></svg></button>';
+        listEl.appendChild(row);
       }
-    });
+      addEl.addEventListener("click", function () { addRow("", ""); });
+      listEl.addEventListener("click", function (e) {
+        if (e.target.classList && e.target.classList.contains("ae-link-del")) {
+          e.target.closest(".ae-link-row").remove();
+        }
+      });
+    }
+    bindList("#aeLinks", "#aeAddLink");
+    bindList("#aeContacts", "#aeAddContact");
 
     $("#aeAvatarFile").addEventListener("change", function () {
       var file = this.files && this.files[0];
@@ -199,20 +207,24 @@
 
     $("#aeSave").addEventListener("click", function () {
       var btn = this;
-      var links = [];
-      $all("#aeLinks .ae-link-row").forEach(function (row) {
-        var label = row.querySelector(".ae-link-label").value.trim();
-        var url = row.querySelector(".ae-link-url").value.trim();
-        if (!label && !url) return;
-        links.push({ label: label, url: url });
-      });
+      function collect(sel) {
+        var out = [];
+        $all(sel + " .ae-link-row").forEach(function (row) {
+          var label = row.querySelector(".ae-link-label").value.trim();
+          var url = row.querySelector(".ae-link-url").value.trim();
+          if (!label && !url) return;
+          out.push({ label: label, url: url });
+        });
+        return out;
+      }
       var body = {
         author_nickname: $("#aeNickname").value.trim(),
         author_bio: $("#aeBio").value,
         site_title: $("#aeSiteTitle").value.trim(),
         site_subtitle: $("#aeSiteSubtitle").value.trim(),
         footer_text: $("#aeFooterText").value.trim(),
-        links: links
+        links: collect("#aeLinks"),
+        contacts: collect("#aeContacts")
       };
       btn.disabled = true;
       postJSON("/api/site", body).then(function (j) {

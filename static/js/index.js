@@ -1,7 +1,8 @@
 /* 首页列表：过滤（不显示不安全/负能量/非学术）、按标签筛选、翻页、每页篇数
    —— 全部在前端做，勾选/翻页都不发任何请求；选择记在 localStorage 里，换页回来还在。
    每页篇数是可手输的数字框（1–MAX_PER，没有"全部"这一档）：越界自动夹紧，清空后失焦还原。
-   卡片上的标签链接（/?tag=xxx）与服务端都只是把「初始选中标签」带进来，筛选照旧在前端完成 */
+   卡片上的标签链接（/?tag=xxx）与服务端都只是把「初始选中标签」带进来，筛选照旧在前端完成。
+   排序：命中选中标签越多越靠前；命中数相同再比置顶量（都相同则保持服务端次序） */
 (function () {
   "use strict";
   var list = document.getElementById("postList");
@@ -18,11 +19,14 @@
   var KEY = "petal.home.filter";
   var MIN_PER = 1, MAX_PER = 200, DEFAULT_PER = 12;   // 与 templates/index.html 的 min / max / value 对应
 
-  var cards = [].slice.call(list.querySelectorAll(".post-card")).map(function (el) {
+  var cards = [].slice.call(list.querySelectorAll(".post-card")).map(function (el, i) {
     var rawFlags = el.getAttribute("data-flags") || "";
     var rawTags = el.getAttribute("data-tags") || "";
     return {
       el: el,
+      idx: i,                                               // 服务端原始次序（排序兜底）
+      pin: parseInt(el.getAttribute("data-pin"), 10) || 0,  // 置顶量，可正可负
+      matched: 0,                                           // 命中的选中标签数
       flags: rawFlags ? rawFlags.split(",") : [],
       tags: rawTags ? rawTags.split(",") : []
     };
@@ -61,15 +65,15 @@
   }
 
   function matches(card) {
+    card.matched = 0;
     for (var i = 0; i < state.hides.length; i++) {
       if (card.flags.indexOf(state.hides[i]) >= 0) return false;    // 勾了"不显示…"
     }
-    if (state.tags.length) {                                        // 选了标签：命中任意一个即可
-      var hit = false;
+    if (state.tags.length) {                       // 选了标签：命中任意一个即可，命中越多越靠前
       for (var j = 0; j < state.tags.length; j++) {
-        if (card.tags.indexOf(state.tags[j]) >= 0) { hit = true; break; }
+        if (card.tags.indexOf(state.tags[j]) >= 0) card.matched++;
       }
-      if (!hit) return false;
+      if (!card.matched) return false;
     }
     return true;
   }
@@ -94,6 +98,15 @@
       if (ok) shown.push(c);
       c.el.hidden = true;
     });
+    /* 先按「命中选中标签数」降序，再按置顶量降序；都相同则维持服务端次序 */
+    shown.sort(function (a, b) {
+      if (b.matched !== a.matched) return b.matched - a.matched;
+      if (b.pin !== a.pin) return b.pin - a.pin;
+      return a.idx - b.idx;
+    });
+    /* 光排序数组不会改变页面视觉顺序：.post-list 是 flex 列，
+       把排序结果写成 order，DOM 里就按新次序显示 */
+    shown.forEach(function (c, i) { c.el.style.order = String(i); });
     var pages = pageCount(shown.length);
     if (state.page > pages) state.page = pages;
     if (state.page < 1) state.page = 1;

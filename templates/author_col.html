@@ -26,9 +26,24 @@
         <div class="stat-cell"><b>{{ stats.views }}</b><span>阅读</span></div>
       </div>
 
+      {% if site.author_contacts %}
+      <div class="link-sec">
+        <div class="link-title">联系方式 · Contact</div>
+        <ul class="author-links contact-links">
+          {% for c in site.author_contacts %}
+          <li>
+            <a href="{{ c.url }}" target="_blank" rel="noopener noreferrer">
+              <span class="dot" aria-hidden="true"></span>{{ c.label }}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
       {% if site.author_links %}
       <div class="link-sec">
-        <div class="link-title">Links · 链接</div>
+        <div class="link-title">友链 · Links</div>
         <ul class="author-links">
           {% for l in site.author_links %}
           <li>
@@ -56,7 +71,7 @@
 
       {% if recent_posts %}
       <div class="link-sec">
-        <div class="link-title">Recent · 最近文章</div>
+        <div class="link-title">最近文章 · Recent</div>
         <ul class="author-links recent-links">
           {% for p in recent_posts %}
           <li><a href="/a/{{ p.id }}"><span class="dot" aria-hidden="true"></span>{{ p.title }}</a></li>

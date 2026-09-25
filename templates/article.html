@@ -14,7 +14,7 @@
         </h1>
         <div class="art-meta dim">
           {% if post.draft %}<span class="draft-badge">草稿</span>{% endif %}
-          {% if post.pin %}<span class="pin-badge">置顶{% if can_edit %}<b>{{ post.pin }}</b>{% endif %}</span>{% endif %}
+          {% if post.pin %}<span class="pin-badge{% if post.pin < 0 %} pin-low{% endif %}" title="置顶量">置顶 <b>{{ post.pin }}</b></span>{% endif %}
           {% for t in post.tags %}
           <a class="cat-tag" href="/?tag={{ t | urlencode }}">{{ t }}</a>
           {% endfor %}
