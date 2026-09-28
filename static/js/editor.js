@@ -368,6 +368,7 @@
 
   /* ---------- 附件上传（仅站长）：粘贴 / 拖入图片会自动上传并插入 Markdown ---------- */
   var uploadsEl = $("edUploads");
+  var toolStateEl = $("edToolState");
   var fileInputEl = $("edFileInput");
   var uploading = 0;
 
@@ -412,10 +413,13 @@
     onInput();
   }
 
-  /* 上传中只把按钮置灰，不再写一行动态说明（站长自己就是开发者） */
+  /* 上传中：按钮置灰 + 工具条右侧报进度（传了几个还剩几个，是有用的信息） */
   function setUploading() {
     var b = $("edToolUpload");
     if (b) b.disabled = uploading > 0;
+    if (toolStateEl) {
+      toolStateEl.textContent = uploading ? "正在上传 " + uploading + " 个文件…" : "";
+    }
   }
 
   function addUploadItem(f) {
@@ -489,7 +493,7 @@
       if (autoInsert) {
         insertTemplate(j.files.map(function (f) { return f.markdown; }).join("\n") + "\n");
       }
-      /* 上传成功不弹提示：结果就在下面的列表里，站长不需要再被告知一遍 */
+      toast("已上传 " + j.files.length + " 个文件", "ok");
     }).catch(function () {
       uploading--;
       setUploading();

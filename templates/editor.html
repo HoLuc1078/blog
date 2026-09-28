@@ -70,13 +70,15 @@
           <svg class="ed-tool-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4.8" y="10.3" width="14.4" height="9.3" rx="1.8"/><path d="M8.4 10.3V7.6a3.6 3.6 0 0 1 7.2 0v2.7"/></svg>
           <span>解锁</span>
         </button>
+        <span class="ed-tool-sep"></span>
+        <span class="ed-tool-state" id="edToolState"></span>
       </div>
       <input type="file" id="edFileInput" hidden multiple
              accept="image/*,video/*,audio/*,.pdf,.zip,.7z,.rar,.gz,.tar,.txt,.md,.csv,.json,.log,.py,.c,.h,.cpp,.hpp,.java,.pas,.tex,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
       {% endif %}
 
       <textarea id="edContent" class="ed-content" spellcheck="false"
-                placeholder="正文（可直接把图片粘贴进来，会自动上传并插入 Markdown）">{% if post %}{{ post.content_md }}{% endif %}</textarea>
+                placeholder="正文">{% if post %}{{ post.content_md }}{% endif %}</textarea>
 
       <div class="ed-uploads" id="edUploads"></div>
 
@@ -142,16 +144,6 @@
           <label class="chk"><input type="checkbox" class="ed-flag" value="{{ key }}"
             {% if post and key in (post.flags or '').split(',') %}checked{% endif %}><span>{{ label }}</span></label>
           {% endfor %}
-        </div>
-      </div>
-
-      <div class="glass side-card">
-        <h4 class="side-title">扩展语法</h4>
-        <div class="ed-help">
-          <p><code>![说明](地址)</code> 图片</p>
-          <p><code>~[标题](地址)</code> 视频</p>
-          <p><code>*[文件名](地址)</code> 文件</p>
-          <p><code>charge[标题]</code> … <code>:::</code> 评论解锁</p>
         </div>
       </div>
 

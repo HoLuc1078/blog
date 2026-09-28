@@ -42,6 +42,7 @@
         <button type="button" class="theme-btn" data-theme-set="dark" title="暗黑" aria-label="暗黑"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-moon"></use></svg></button>
       </div>
         {% if is_owner %}
+        <a class="top-link" href="/files">上传</a>
         <a class="top-link" href="/drafts">草稿箱{% if draft_n %} ({{ draft_n }}){% endif %}</a>
         <a class="btn btn-primary" href="/write"><svg class="icon" aria-hidden="true" focusable="false"><use href="#icon-pen"></use></svg>写文章</a>
         {% endif %}

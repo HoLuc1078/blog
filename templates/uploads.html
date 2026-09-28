@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}上传 · {{ site.site_title }}{% endblock %}
+{% block content %}
+<div class="layout">
+  <main class="main-col">
+
+    {# ---------- 上传区 ---------- #}
+    <section class="glass upl-card">
+      <div class="upl-head">
+        <h2 class="panel-title">上传</h2>
+        <span class="dim small">传完直接给 Markdown 与直链</span>
+      </div>
+      <div class="upl-drop" id="uplDrop">
+        <svg class="upl-drop-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 15.6V4.4"/><path d="M7.6 8.8 12 4.4l4.4 4.4"/><path d="M4.4 15.4v3a2.6 2.6 0 0 0 2.6 2.6h10a2.6 2.6 0 0 0 2.6-2.6v-3"/></svg>
+        <div class="upl-drop-main" id="uplState">把文件拖到这里，或 <button type="button" class="upl-link" id="uplPick">选择文件</button>，也可以直接 Ctrl+V 粘贴</div>
+        <div class="upl-drop-sub dim">图片 / 视频 / 音频 / 文档；单个图片或文档最大 8MB，视频音频 64MB，一次最多 {{ 8 }} 个</div>
+        <input type="file" id="uplInput" hidden multiple
+               accept="image/*,video/*,audio/*,.pdf,.zip,.7z,.rar,.gz,.tar,.txt,.md,.csv,.json,.log,.py,.c,.h,.cpp,.hpp,.java,.pas,.tex,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
+      </div>
+      <div class="upl-results" id="uplResults"></div>
+    </section>
+
+    {# ---------- 已上传 ---------- #}
+    <section class="glass upl-card">
+      <div class="upl-head">
+        <h2 class="panel-title">已上传</h2>
+        <span class="dim small">共 {{ total_all }} 个 · 占用 {{ fmt_size(used) }}</span>
+      </div>
+
+      <div class="upl-filters">
+        <a class="tag-chip{{ ' on' if not cur_kind }}" href="/files">全部 {{ total_all }}</a>
+        {% for key, label in kinds %}
+        <a class="tag-chip{{ ' on' if cur_kind == key }}" href="/files?kind={{ key }}">{{ label }} {{ counts.get(key, 0) }}</a>
+        {% endfor %}
+      </div>
+
+      {% if items %}
+      <div class="upl-grid" id="uplGrid">
+        {% for it in items %}
+        <div class="upl-item" data-id="{{ it.id }}">
+          <a class="upl-thumb" href="{{ it.url }}" target="_blank" rel="noopener noreferrer">
+            {% if it.is_image %}
+            <img src="{{ it.url }}" alt="{{ it.name }}" loading="lazy">
+            {% else %}
+            <span class="upl-ext upl-ext-{{ it.kind }}">{{ it.ext | upper }}</span>
+            {% endif %}
+          </a>
+          <div class="upl-info">
+            <div class="upl-name" title="{{ it.name }}">{{ it.name }}</div>
+            <div class="upl-meta dim">{{ it.created }} · {{ fmt_size(it.size) }}</div>
+            <div class="upl-md" title="{{ it.markdown }}">{{ it.markdown }}</div>
+            <div class="upl-acts">
+              <button type="button" data-copy="{{ it.markdown }}" data-copied="Markdown 已复制">Markdown</button>
+              <button type="button" data-copy="{{ it.abs_url }}" data-copied="直链已复制">直链</button>
+              <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer">打开</a>
+              <form method="post" action="/files/{{ it.id }}/delete" class="inline-form"
+                    data-confirm="删除「{{ it.name }}」？文件会从服务器上一起删掉。">
+                <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+                <input type="hidden" name="next" value="{{ request.full_path }}">
+                <button type="submit" class="upl-del">删除</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% if pages > 1 %}
+      <nav class="pager upl-pager">
+        {% set q = ('&kind=' + cur_kind) if cur_kind else '' %}
+        {% if page > 1 %}<a class="btn small" href="/files?page={{ page - 1 }}{{ q }}">‹ 上一页</a>{% endif %}
+        <span class="dim small">第 {{ page }} / {{ pages }} 页</span>
+        {% if page < pages %}<a class="btn small" href="/files?page={{ page + 1 }}{{ q }}">下一页 ›</a>{% endif %}
+      </nav>
+      {% endif %}
+
+      {% else %}
+      <p class="dim upl-empty">还没有传过东西。</p>
+      {% endif %}
+    </section>
+  </main>
+
+  {% include "author_col.html" %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/js/uploads.js"></script>{% endblock %}

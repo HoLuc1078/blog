@@ -163,6 +163,16 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS idx_articles_created ON articles(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_comments_article ON comments(article_id);
+CREATE TABLE IF NOT EXISTS uploads (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    rel         TEXT NOT NULL UNIQUE,            -- 相对 uploads/ 的路径：2026/09/<16位随机名>.<ext>
+    name        TEXT NOT NULL DEFAULT '',       -- 上传时的原始文件名
+    ext         TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL DEFAULT 'file',   -- image / video / audio / file
+    size        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_uploads_created ON uploads(created_at DESC);
 CREATE TABLE IF NOT EXISTS site_cfg (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
@@ -536,6 +546,22 @@ def all_tags(limit=50):
             sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]]
 
 
+def fmt_size(n):
+    """字节数 -> 人看的字符串。"""
+    try:
+        n = float(n or 0)
+    except (TypeError, ValueError):
+        return "0 B"
+    if n < 1024:
+        return "%d B" % n
+    for unit in ("KB", "MB", "GB"):
+        n /= 1024.0
+        if n < 1024 or unit == "GB":
+            return "%.1f %s" % (n, unit)
+    return "%.1f GB" % n
+
+
+app.jinja_env.globals["fmt_size"] = fmt_size
 app.jinja_env.globals["tag_list"] = tag_list
 app.jinja_env.globals["MAX_TAGS"] = MAX_TAGS
 app.jinja_env.globals["MAX_TAG_LEN"] = MAX_TAG_LEN
@@ -1601,21 +1627,45 @@ def api_upload():
         fname = secrets.token_hex(8) + "." + ext
         with open(os.path.join(target_dir, fname), "wb") as fh:
             fh.write(data)
-        url = "/u/%s/%s" % (rel_dir, fname)
-        if kind == "image":
-            label = _upload_basename(f.filename, False)
-            md = "![%s](%s)" % (label, url)
-        elif kind in ("video", "audio"):
-            label = _upload_basename(f.filename, False)
-            md = "~[%s](%s)" % (label, url)
-        else:
-            label = _upload_basename(f.filename, True)
-            md = "*[%s](%s)" % (label, url)
-        out.append({"url": url, "abs_url": request.url_root.rstrip("/") + url,
-                    "name": _upload_basename(f.filename, True), "label": label,
-                    "ext": ext, "kind": kind, "mime": mime, "size": len(data),
-                    "markdown": md})
+        rel = "%s/%s" % (rel_dir, fname)
+        name = _upload_basename(f.filename, True)
+        uid = 0
+        try:                       # 落盘成功即可用；入库失败不该让整次上传失败
+            cur = get_db().execute(
+                "INSERT INTO uploads(rel, name, ext, kind, size, created_at) "
+                "VALUES(?,?,?,?,?,?)", (rel, name, ext, kind, len(data), now_str()))
+            get_db().commit()
+            uid = cur.lastrowid
+        except sqlite3.Error:
+            uid = 0
+        out.append(_upload_entry(rel, name, ext, kind, len(data), uid))
     return jsonify(ok=True, files=out)
+
+
+def _upload_markdown(kind, label, url):
+    """按类型给出对应的嵌入写法（和 md_math 认的三条指令一致）。"""
+    if kind == "image":
+        return "![%s](%s)" % (label, url)
+    if kind in ("video", "audio"):
+        return "~[%s](%s)" % (label, url)
+    return "*[%s](%s)" % (label, url)
+
+
+def _upload_entry(rel, name, ext, kind, size, uid=0, created=None):
+    """给前端 / 模板用的一条上传记录。"""
+    url = "/u/" + rel
+    label = name.rsplit(".", 1)[0] if (kind != "file" and "." in name) else name
+    try:
+        base = request.url_root.rstrip("/")
+    except RuntimeError:                     # 不在请求里（理论上不会）
+        base = ""
+    return {
+        "id": uid, "rel": rel, "url": url, "abs_url": base + url,
+        "name": name, "label": label, "ext": ext, "kind": kind, "size": size,
+        "markdown": _upload_markdown(kind, label, url),
+        "created": fmt_dt(created) if created else "",
+        "is_image": kind == "image",
+    }
 
 
 app.add_url_rule("/api/upload", "api_upload", api_upload, methods=["POST"])
@@ -1640,6 +1690,104 @@ def upload_file(rel):
     resp.headers["Content-Disposition"] = "inline" if kind != "file" else "attachment"
     resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     return resp
+
+
+# ----------------------------------------------------------------------
+# 上传页 /files（仅站长）：传文件拿 Markdown / 直链，也能翻以前传过的
+# ----------------------------------------------------------------------
+UPLOAD_PAGE_SIZE = 60
+UPLOAD_KIND_LABEL = [("image", "图片"), ("video", "视频"), ("audio", "音频"), ("file", "文件")]
+
+
+def _sync_uploads():
+    """让 uploads/ 目录与 uploads 表对上。
+
+    老版本上传的文件没有入库记录，这里按目录补进去；反过来，表里有、磁盘上已经没有的
+    行也删掉（手工清理过目录之后列表才不会是幽灵条目）。
+    """
+    db = get_db()
+    known = {r["rel"] for r in db.execute("SELECT rel FROM uploads")}
+    added = 0
+    for dirpath, _dirs, filenames in os.walk(UPLOAD_ROOT):
+        for fn in filenames:
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, UPLOAD_ROOT).replace(os.sep, "/")
+            if rel in known or not _UPLOAD_REL_RE.match(rel):
+                continue
+            ext = rel.rsplit(".", 1)[-1].lower()
+            kind = UPLOAD_KINDS.get(ext, ("file", ""))[0]
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            db.execute(
+                "INSERT OR IGNORE INTO uploads(rel, name, ext, kind, size, created_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (rel, fn, ext, kind, st.st_size,
+                 datetime.fromtimestamp(st.st_mtime, timezone.utc)
+                 .strftime("%Y-%m-%d %H:%M:%S")))
+            added += 1
+    removed = 0
+    for r in list(db.execute("SELECT id, rel FROM uploads")):
+        p = os.path.join(UPLOAD_ROOT, *r["rel"].split("/"))
+        if not os.path.isfile(p):
+            db.execute("DELETE FROM uploads WHERE id=?", (r["id"],))
+            removed += 1
+    if added or removed:
+        db.commit()
+
+
+@app.route("/files")
+def uploads_page():
+    """上传页：传完直接给 Markdown 与直链，下面列的是以前传过的东西。"""
+    if not owner_unlocked():
+        return redirect(url_for("admin_entry", next="/files"))
+    _sync_uploads()
+    db = get_db()
+    kind = (request.args.get("kind") or "").strip()
+    if kind not in dict(UPLOAD_KIND_LABEL):
+        kind = ""
+    where, args = (" WHERE kind=?", [kind]) if kind else ("", [])
+    total = db.execute("SELECT COUNT(*) c FROM uploads" + where, args).fetchone()["c"]
+    total_all = db.execute("SELECT COUNT(*) c FROM uploads").fetchone()["c"]
+    used = db.execute("SELECT COALESCE(SUM(size),0) s FROM uploads").fetchone()["s"]
+    try:
+        page = max(1, int(request.args.get("page") or 1))
+    except (TypeError, ValueError):
+        page = 1
+    pages = max(1, (total + UPLOAD_PAGE_SIZE - 1) // UPLOAD_PAGE_SIZE)
+    page = min(page, pages)
+    rows = db.execute(
+        "SELECT * FROM uploads" + where +
+        " ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+        args + [UPLOAD_PAGE_SIZE, (page - 1) * UPLOAD_PAGE_SIZE]).fetchall()
+    items = [_upload_entry(r["rel"], r["name"], r["ext"], r["kind"], r["size"],
+                           r["id"], r["created_at"]) for r in rows]
+    counts = {r["kind"]: r["n"] for r in
+              db.execute("SELECT kind, COUNT(*) n FROM uploads GROUP BY kind")}
+    return render_template("uploads.html", items=items, cur_kind=kind, page=page,
+                           pages=pages, total=total, total_all=total_all, used=used,
+                           counts=counts, kinds=UPLOAD_KIND_LABEL)
+
+
+@app.route("/files/<int:uid>/delete", methods=["POST"])
+def delete_upload(uid):
+    gate = _required_owner()
+    if gate:
+        return gate
+    db = get_db()
+    row = db.execute("SELECT rel FROM uploads WHERE id=?", (uid,)).fetchone()
+    if row:
+        db.execute("DELETE FROM uploads WHERE id=?", (uid,))
+        db.commit()
+        path = os.path.join(UPLOAD_ROOT, *row["rel"].split("/"))
+        # 再保险一次：只删 uploads/ 目录里的东西
+        if os.path.abspath(path).startswith(os.path.abspath(UPLOAD_ROOT) + os.sep):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return redirect(safe_next(request.form.get("next") or "/files"))
 
 
 # ----------------------------------------------------------------------

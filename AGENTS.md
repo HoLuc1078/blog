@@ -81,6 +81,8 @@ templates/           Jinja2 模板（服务端渲染；除 editor.html 外都 ex
                      左右双栏 + 右侧文章设置（摘要、标签、置顶量、发布时间、过滤标记、
                      图标搜索、存草稿）。逻辑在 static/js/editor.js。
   drafts.html        草稿箱：仅站长可见，列出草稿并可继续编辑 / 发布 / 删除。
+  uploads.html       上传页 /files：拖拽 / 选择 / 粘贴上传 + 已上传列表（缩略图、筛选、
+                     分页、复制 Markdown / 直链、删除）。逻辑在 static/js/uploads.js。
   admin.html         管理入口 /admin：设口令 / 输口令解锁 / 改口令 / 锁定。
   author_col.html    首页右侧作者栏（3:1 分栏的 1）：头像、昵称、简介、联系方式、友链、数据统计。
   author_edit_modal.html  站长专用的「编辑作者栏 / 站点」弹窗（base.html 里按 is_owner 引入）。
@@ -95,8 +97,10 @@ static/
                      代码块复制、删除确认、作者栏编辑弹窗、验证码刷新、评论回复框。
   js/index.js        首页列表：过滤 / 标签筛选 / 翻页 / 每页篇数（**全部在前端做，零请求**）；
                      选择存 localStorage；多选标签时按命中标签数降序、再按置顶量降序重排。
-  js/editor.js       编辑器逻辑：编辑-预览切换、快捷插入 Markdown 与 LaTeX、摘要、标签编辑、
-                     图标搜索与随机、置顶量、发布时间、过滤标记、本地草稿、提交前校验。
+  js/editor.js       编辑器逻辑：编辑-预览切换、快捷插入 Markdown 与 LaTeX、附件上传
+                     （工具条按钮 + 粘贴 / 拖入自动上传）、摘要、标签编辑、图标搜索与随机、
+                     置顶量、发布时间、过滤标记、本地草稿、提交前校验。
+  js/uploads.js      上传页 /files 的逻辑：上传、结果卡片、复制、往列表里插新卡片。
   icons.svg          iconfont sprite：380 个 ic-* 图标（约 800KB）。编辑器图标选择器直接
                      <use href="/static/icons.svg#ic-x">；文章页只内联用到的那几个 <symbol>。
   icons-local.svg   站内那 27 个图标（24 水果 + 樱花 / 彩虹 / 四叶草，约 33KB）。
@@ -122,6 +126,9 @@ uploads/             站长上传的附件（YYYY/MM/<16 位随机名>.<ext>，*
   `icon`（图标名，空 = 用默认 `icon-sakura`）/ `views` / `created_at` / `updated_at`。
 - **comments**：`id` / `article_id` / `parent_id`（0 = 顶层）/ `author_name` / `ip` / `content` / `created_at`。
   展示时由 `_thread_comments()` 拍平成「顶层 + 其下所有回复」两级。
+- **uploads**：`id` / `rel`（相对 `uploads/` 的路径，唯一）/ `name`（原始文件名）/ `ext` /
+  `kind`（image / video / audio / file）/ `size` / `created_at`。`/files` 页面靠它列出历史附件；
+  老库启动时 `SCHEMA` 会自动补这张表，目录里已有的文件由 `_sync_uploads()` 补录。
 - **无新表**：`:::charge` 的解锁状态不落库，走签名 cookie `petal_unlock`（见第 5 节第 13 条）。
 - **site_cfg**：键值表。站点标题 / 副标题 / 页脚 / 昵称 / 简介 / 联系方式 JSON（`author_contacts`）/ 友链 JSON（`author_links`）/
   `contacts_split`（旧 author_links 拆到联系方式的一次性标记）/ `owner_pass_hash`（站长口令哈希）。
@@ -167,7 +174,9 @@ uploads/             站长上传的附件（YYYY/MM/<16 位随机名>.<ext>，*
 11. **没有构建步骤**：改 JS/CSS 就是改文件，浏览器强刷即生效（静态文件走 Flask 默认缓存策略）。
     Python 侧默认**不会**自动重载（`DEBUG` 默认关），本机开发要么设 `DEBUG=1`，要么改完手动重启。
 12. **入库的边界**：`blog.db`、`.secret_key`、`On_server/`、`uploads/`、`*.bak-*`、`__pycache__/` 都被
-    `.gitignore` 忽略，**不要 add -f**。数据库结构变更要同时更新 `SCHEMA`（幂等）和 `migrate.py`。
+    `.gitignore` 忽略，**不要 add -f**。数据库结构变更：`SCHEMA` 是 `CREATE TABLE IF NOT EXISTS`，
+    启动时 `init_db()` 会幂等地把新表补齐，**加表 / 加索引用它就够了**；`migrate.py` 只负责
+    改数据的老数据（图标名对齐、清历史残留），改列名 / 改列类型这种才需要往它里面加一段。
 13. **`:::charge` 的解锁凭证必须签名**（`_charge_sig()` / `_grant_charge()` / `charge_unlocked()`）：
     在本页评论成功后往 cookie `petal_unlock` 里塞一条 `文章id:评论id:HMAC(secret_key)`，
     最多 20 条、一年有效。cookie 是明文存在客户端的，**不签名就等于谁都能自己编一条「我评论过」**；
@@ -177,6 +186,8 @@ uploads/             站长上传的附件（YYYY/MM/<16 位随机名>.<ext>，*
     其余统一 `Content-Disposition: attachment`。`UPLOAD_KINDS` 是**扩展名白名单**
     （`.html` / `.svg` / `.js` / `.xml` 一律不收），会内联的几类还要过 `_magic_type()` 文件头校验。
     要加新类型就改 `UPLOAD_KINDS`，别放开白名单。
+    上传结果会记进 `uploads` 表（`/files` 页面用），但**落盘成功才算成功**：入库失败只是列表里
+    少一条，不该让整次上传失败；反过来的幽灵条目由 `_sync_uploads()`（每次打开 /files 跑一次）清掉。
 15. **`md_math._TokenStore` 的每个「类」都要占一段独立的私有代理字符**：`\uE000/\uE001` 数学、
     `\uE002/\uE003` 行内代码、`\uE004/\uE005` 容器、`\uE006/\uE007` cute-table、
     `\uE008/\uE009` 视频 / 文件卡片。**加新语法时一定要挑一段没人用的**——`md_render` 里
@@ -197,7 +208,8 @@ uploads/             站长上传的附件（YYYY/MM/<16 位随机名>.<ext>，*
 | 改站点文案 / 昵称 / 链接的默认值 | `app.py` 的 `load_cfg()` 与 `templates/author_col.html` |
 | 加 / 改扩展语法（视频、文件卡片、`:::charge` 之类） | `md_math.py`：行内指令加在 `_substitute_media` 那一套里，容器加在 `_render_container`；**新占一段私有代理字符**（第 5 节第 15 条），并同步 README 的语法清单 |
 | 改图片缩放 / 灯箱 | `static/css/style.css` 的 `.md-body img` 与 `.img-zoom*` + `static/js/app.js` 的 `bindImageZoom()` |
-| 改上传的类型 / 大小限制 | `app.py` 的 `UPLOAD_KINDS` / `MAX_UPLOAD*` / `_magic_type()`；前端在 `static/js/editor.js` |
+| 改上传的类型 / 大小限制 | `app.py` 的 `UPLOAD_KINDS` / `MAX_UPLOAD*` / `_magic_type()`；前端在 `static/js/editor.js`（编辑页）与 `static/js/uploads.js`（/files） |
+| 改上传页 /files | `templates/uploads.html` + `static/js/uploads.js` + `app.py` 的 `uploads_page()` / `delete_upload()` / `_sync_uploads()`；`uploads` 表在 `SCHEMA` 里 |
 | 改 `:::charge` 的解锁规则 | `app.py` 的 `charge_unlocked()` / `_grant_charge()` + `md_math.md_render(ctx=…)` 的 `ctx` |
 
 ## 7. 改动检查清单
@@ -212,6 +224,7 @@ uploads/             站长上传的附件（YYYY/MM/<16 位随机名>.<ext>，*
 - [ ] 扩展语法：`~[标题](B站/YouTube/mp4 直链)` 三种都出得来，`*[文件名](地址)` 点得动。
 - [ ] `:::charge`：游客页面里**搜不到里面的正文**（查看源码也没有）；评论成功后同浏览器立刻可见；把那条评论删掉又变回锁着。
 - [ ] 上传：图片 / 视频 / 文档各传一个；**在编辑区直接粘贴截图**会自动上传并插入 Markdown；`.html` / `.svg` / 改名的假图片都被拒。
+- [ ] `/files`：拖拽 / 选择 / 粘贴都能传；结果卡片给得出 Markdown 与直链；列表按类型筛选、分页、删除都正常（删完磁盘上也没了）；游客访问跳 `/admin`。
 - [ ] 正文图片不透明、按屏幕缩放，点一下能进灯箱（滚轮 / 拖动 / Esc）。
 - [ ] 手机宽度下布局不炸（顶栏、3:1 分栏、编辑器、文件卡片、视频）。
 - [ ] 改动后确认 `git status` 里没有 `blog.db` / `.secret_key` / `__pycache__` / `uploads/` / `*.bak-*`。
