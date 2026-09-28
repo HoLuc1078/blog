@@ -17,7 +17,8 @@
       <div class="filter-bar" id="filterBar" data-cur-tag="{{ cur_tag }}">
         <div class="filter-row">
           <span class="filter-label">过滤</span>
-          <label class="chk"><input type="checkbox" data-hide="unsafe"><span>不显示不安全内容</span></label>
+          {# 默认勾上「不安全」：JS 没跑起来时也是对的，index.js 里的 DEFAULT_HIDES 与之对应 #}
+          <label class="chk"><input type="checkbox" data-hide="unsafe" checked><span>不显示不安全内容</span></label>
           <label class="chk"><input type="checkbox" data-hide="negative"><span>不显示负能量内容</span></label>
           <label class="chk"><input type="checkbox" data-hide="nonacademic"><span>不显示非学术内容</span></label>
         </div>

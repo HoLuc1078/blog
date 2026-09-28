@@ -327,6 +327,130 @@
     });
   }
 
+  /* ---------- 图片灯箱：点正文里的图片放大看原图 ---------- */
+  function bindImageZoom() {
+    var box = null, pic = null, bar = null, pct = null;
+    var scale = 1, tx = 0, ty = 0, drag = null, lastFocus = null;
+
+    function paint() {
+      pic.style.transform = "translate(" + tx + "px, " + ty + "px) scale(" + scale + ")";
+      if (pct) pct.textContent = Math.round(scale * 100) + "%";
+    }
+    /* 以鼠标位置（没给就按图片中心）为锚点缩放，视觉上更跟手 */
+    function setScale(next, cx, cy) {
+      next = Math.min(8, Math.max(0.15, next));
+      if (next === scale) return;
+      var r = pic.getBoundingClientRect();
+      var ax = cx == null ? r.left + r.width / 2 : cx;
+      var ay = cy == null ? r.top + r.height / 2 : cy;
+      var ox = (ax - (r.left + r.width / 2)) / scale;
+      var oy = (ay - (r.top + r.height / 2)) / scale;
+      tx -= ox * (next - scale);
+      ty -= oy * (next - scale);
+      scale = next;
+      paint();
+    }
+    function reset() { scale = 1; tx = 0; ty = 0; paint(); }
+
+    function build() {
+      box = document.createElement("div");
+      box.className = "img-zoom";
+      box.hidden = true;
+      pic = document.createElement("img");
+      pic.className = "img-zoom-pic";
+      pic.alt = "";
+      pic.draggable = false;
+      bar = document.createElement("div");
+      bar.className = "img-zoom-bar";
+      bar.innerHTML =
+        '<button type="button" data-zoom="out" title="缩小">−</button>' +
+        '<span class="zoom-pct">100%</span>' +
+        '<button type="button" data-zoom="in" title="放大">+</button>' +
+        '<button type="button" data-zoom="one" title="原始大小">1:1</button>' +
+        '<button type="button" data-zoom="close" title="关闭">关闭</button>';
+      pct = bar.querySelector(".zoom-pct");
+      var tip = document.createElement("div");
+      tip.className = "img-zoom-tip";
+      tip.textContent = "滚轮缩放 · 拖动平移 · 双击切换原图 · Esc 关闭";
+      box.appendChild(pic);
+      box.appendChild(bar);
+      box.appendChild(tip);
+      document.body.appendChild(box);
+
+      bar.addEventListener("click", function (e) {
+        var b = e.target.closest ? e.target.closest("button[data-zoom]") : null;
+        if (!b) return;
+        e.stopPropagation();
+        var act = b.getAttribute("data-zoom");
+        if (act === "in") setScale(scale * 1.4);
+        else if (act === "out") setScale(scale / 1.4);
+        else if (act === "one") reset();
+        else close();
+      });
+      box.addEventListener("click", function (e) {
+        if (e.target === box) close();          // 点背景关闭；点图本身不关
+      });
+      box.addEventListener("wheel", function (e) {
+        e.preventDefault();
+        setScale(scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY);
+      }, { passive: false });
+      box.addEventListener("dblclick", function (e) {
+        e.preventDefault();
+        if (scale > 1.01) reset();
+        else setScale(2, e.clientX, e.clientY);
+      });
+      pic.addEventListener("pointerdown", function (e) {
+        if (scale <= 1.01) return;
+        e.preventDefault();
+        drag = { x: e.clientX, y: e.clientY, tx: tx, ty: ty };
+        box.classList.add("grabbing");
+        try { pic.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      });
+      pic.addEventListener("pointermove", function (e) {
+        if (!drag) return;
+        tx = drag.tx + (e.clientX - drag.x);
+        ty = drag.ty + (e.clientY - drag.y);
+        paint();
+      });
+      function endDrag() { drag = null; box.classList.remove("grabbing"); }
+      pic.addEventListener("pointerup", endDrag);
+      pic.addEventListener("pointercancel", endDrag);
+      pic.addEventListener("error", function () { toast("图片加载失败", "err"); });
+    }
+
+    function open(src, alt, from) {
+      if (!box) build();
+      lastFocus = from || null;
+      pic.src = src;
+      pic.alt = alt || "";
+      reset();
+      box.hidden = false;
+      document.body.classList.add("zoom-open");
+      document.body.style.overflow = "hidden";
+    }
+    function close() {
+      if (!box || box.hidden) return;
+      box.hidden = true;
+      pic.removeAttribute("src");
+      drag = null;
+      document.body.classList.remove("zoom-open");
+      document.body.style.overflow = "";
+      if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) { /* ignore */ } }
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && box && !box.hidden) close();
+    });
+    document.addEventListener("click", function (e) {
+      var img = e.target.closest ? e.target.closest(".md-body img") : null;
+      if (!img || img.classList.contains("img-zoom-pic")) return;
+      if (img.closest("a")) return;                 // 图片本身是链接：让人正常跳转
+      if (!img.currentSrc && !img.src) return;
+      e.preventDefault();
+      open(img.currentSrc || img.src, img.getAttribute("alt") || "", img);
+    });
+  }
+
   /* ---------- 启动 ---------- */
   function init() {
     bindConfirms();
@@ -336,6 +460,7 @@
     bindExternalImages();
     bindAuthorEditor();
     bindCommentReply();
+    bindImageZoom();
     attachCodeCopy(document.body);
     renderMath(document.body);
   }

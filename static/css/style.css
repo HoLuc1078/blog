@@ -194,7 +194,9 @@ form.inline-form { display: inline-block; margin: 0; }
   flex: 3 1 0; min-width: 0;
   display: flex; flex-direction: column; gap: 12px;
   padding: 14px 0 26px;
-  opacity: .75;              /* 主栏整体 75% 不透明 */
+  /* 这里**不能**用 opacity 做整体淡出：opacity 会把整棵子树合成一层再统一压透明，
+     子元素没法「自己调回 1」，正文里的图片会跟着一起发灰、看不清。
+     淡出感交给面板底色与墨色自己带（--glass / .md-body 的颜色）。 */
 }
 /* 作者栏：纯色实心长方形、无圆角、固定高度吸顶；只有内部列表各自滚动 */
 .author-col {
@@ -423,11 +425,8 @@ form.inline-form { display: inline-block; margin: 0; }
 .md-body h2 { font-size: 20px; border-left: 4px solid var(--accent); padding-left: 10px; }
 .md-body h3 { font-size: 17px; }
 .md-body h4 { font-size: 15px; }
-/* 主栏整体 75% 不透明（见 .main-col），正文墨色按这个透明度反推，
-   落地才是正常深浅；作者栏不在主栏里，用上面那套原色即可 */
-.main-col .md-body { color: #33243a; }
-.main-col .md-body h1, .main-col .md-body h2,
-.main-col .md-body h3, .main-col .md-body h4 { color: #2f1f2b; }
+/* 主栏以前整体压 75% 透明，正文墨色是特意加深来抵消它的；现在不压了，
+   直接用上面那套原色即可（作者栏本来也在用它）。 */
 .md-body a { color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }
 .md-body code {
   background: var(--code-bg); color: #b1678c; padding: 2px 6px; border-radius: var(--r-xs);
@@ -458,7 +457,14 @@ form.inline-form { display: inline-block; margin: 0; }
   border: 0; height: 1px; margin: 18px 0;
   background: linear-gradient(90deg, transparent, rgba(var(--tint), 0.55), transparent);
 }
-.md-body img { max-width: 100%; border-radius: 0; }
+/* 正文图片：默认就按屏幕缩放（宽不溢出、高不超过一屏 82%），不按原始像素铺开；
+   点一下进灯箱看原图 / 放大。opacity 显式写死成 1，别被任何祖先的透明度连累。 */
+.md-body img {
+  max-width: 100%; height: auto; max-height: 82vh;
+  opacity: 1; vertical-align: middle;
+  border: 1px solid var(--border-soft); border-radius: var(--r-sm);
+  cursor: zoom-in;
+}
 /* 洛谷风格容器 :::info::: 等（浅色版） */
 .md-body .md-block {
   --acc: var(--accent-deep);
@@ -1230,4 +1236,178 @@ html[data-theme="dark"] .md-body .cute-table-tuack col:not(:first-child) { borde
 img.theme-dark-only { display: none; }
 html[data-theme="dark"] img.theme-light-only { display: none; }
 html[data-theme="dark"] img.theme-dark-only { display: block; }
+/* ============================================================
+   本站扩展 Markdown：~[]() 视频 / *[]() 文件卡片 / :::charge 评论解锁
+   ============================================================ */
 
+/* ---------- 图片灯箱：点正文图片放大看原图 ---------- */
+body.zoom-open { overflow: hidden; }
+.img-zoom {
+  position: fixed; inset: 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(26, 16, 24, .88);
+  cursor: zoom-out; overflow: hidden; touch-action: none;
+}
+.img-zoom .img-zoom-pic {
+  max-width: 96vw; max-height: 92vh; width: auto; height: auto;
+  border-radius: var(--r-sm); box-shadow: 0 18px 60px rgba(0, 0, 0, .55);
+  cursor: default; user-select: none; -webkit-user-drag: none;
+  transform-origin: center center; will-change: transform;
+}
+.img-zoom.grabbing .img-zoom-pic { cursor: grabbing; }
+.img-zoom-bar {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+  display: flex; gap: 6px; align-items: center; z-index: 121;
+  padding: 6px 12px; border-radius: 999px; font-size: 13px;
+  background: rgba(30, 20, 28, .78); color: #fff;
+  border: 1px solid rgba(255, 255, 255, .22);
+}
+.img-zoom-bar button {
+  cursor: pointer; font: inherit; font-size: 13px; padding: 3px 12px;
+  color: #fff; background: rgba(255, 255, 255, .14);
+  border: 1px solid rgba(255, 255, 255, .24); border-radius: 999px;
+}
+.img-zoom-bar button:hover { background: rgba(255, 255, 255, .30); }
+.img-zoom-bar .zoom-pct { min-width: 46px; text-align: center; opacity: .9; }
+.img-zoom-tip {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 121;
+  color: rgba(255, 255, 255, .68); font-size: 12.5px; pointer-events: none;
+}
+
+/* ---------- ~[标题](地址)：视频 ---------- */
+.md-body figure.md-video { margin: 14px 0; }
+.md-body .md-video-el {
+  display: block; width: 100%; max-height: 78vh;
+  background: #000; border: 1px solid var(--border-soft); border-radius: var(--r-sm);
+}
+.md-body .md-video-frame {
+  position: relative; width: 100%; aspect-ratio: 16 / 9;
+  background: #000; border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm); overflow: hidden;
+}
+.md-body .md-video-frame iframe {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; border: 0;
+}
+.md-body .md-video-cap {
+  margin-top: 6px; font-size: 12.5px; color: var(--dim); text-align: center;
+}
+
+/* ---------- *[文件名](地址)：下载卡片 ---------- */
+.md-body .md-file {
+  display: flex; align-items: center; gap: 12px;
+  margin: 12px 0; padding: 11px 14px; max-width: 560px;
+  background: var(--solid-card); border: 1px solid var(--border);
+  border-left: 4px solid var(--accent); border-radius: 0;
+}
+.md-body .md-file-ext {
+  flex: 0 0 auto; width: 46px; height: 46px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11.5px; font-weight: 800; letter-spacing: .3px;
+  color: var(--accent-ink); background: rgba(var(--tint-soft), .26);
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+}
+.md-body .md-file-main {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.md-body a.md-file-name {
+  font-weight: 700; font-size: 14px; color: var(--accent-ink);
+  text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.md-body a.md-file-name:hover { text-decoration: underline; text-underline-offset: 3px; }
+.md-body .md-file-sub { font-size: 12px; color: var(--dim); }
+.md-body a.md-file-btn {
+  flex: 0 0 auto; padding: 6px 15px; font-size: 13px; text-decoration: none;
+  background: var(--accent-deep); color: var(--on-accent); border-radius: var(--r-sm);
+}
+.md-body a.md-file-btn:hover { background: var(--accent); color: var(--on-accent); }
+
+/* ---------- :::charge —— 评论后才能看 ---------- */
+.md-body .md-charge {
+  margin: 12px 0; border: 1px dashed var(--border);
+  border-left: 4px solid var(--accent); background: var(--solid-card);
+  border-radius: 0; overflow: hidden;
+}
+.md-body .md-charge-head {
+  display: flex; align-items: center; gap: 8px; padding: 9px 14px;
+  background: rgba(var(--tint-soft), .16);
+  border-bottom: 1px solid var(--border-soft);
+}
+/* 只作用于锁图标本身：外层的 .md-charge-lock 是整块容器（见上），别跟着一起缩成 17px */
+.md-body svg.md-charge-lock { width: 17px; height: 17px; flex: 0 0 auto; color: var(--accent-deep); }
+.md-body .md-charge-tag { font-weight: 700; font-size: 14px; color: var(--accent-ink); }
+.md-body .md-charge-tip { padding: 12px 14px 0; font-size: 13px; color: var(--dim); }
+.md-body a.md-charge-btn {
+  display: inline-block; margin: 10px 14px 14px; padding: 7px 16px; font-size: 13px;
+  background: var(--accent-deep); color: var(--on-accent);
+  border-radius: var(--r-sm); text-decoration: none;
+}
+.md-body a.md-charge-btn:hover { background: var(--accent); color: var(--on-accent); }
+.md-body .md-charge-body { padding: 10px 14px 12px; }
+.md-body .md-charge-body > :first-child { margin-top: 0; }
+.md-body .md-charge-body > :last-child { margin-bottom: 0; }
+.md-body .md-charge-open { border-style: solid; }
+
+/* 暗色下这几块用面板色，别在深底上又糊成一片 */
+html[data-theme="dark"] .md-body .md-file,
+html[data-theme="dark"] .md-body .md-charge { background: rgba(255, 255, 255, .04); }
+
+/* ---------- 编辑器：上传工具条与上传结果 ---------- */
+.ed-tools {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 6px 8px; border-bottom: 1px solid var(--ed-line);
+  background: rgba(255, 255, 255, .05);
+}
+.ed-tools .ed-tool {
+  cursor: pointer; font: inherit; font-size: 12.5px; line-height: 1.4;
+  padding: 4px 11px; color: var(--ed-ink);
+  background: rgba(255, 255, 255, .08);
+  border: 1px solid var(--ed-line); border-radius: var(--r-sm);
+}
+.ed-tools .ed-tool:hover { background: rgba(255, 255, 255, .18); }
+.ed-tools .ed-tool:disabled { opacity: .5; cursor: default; }
+.ed-tools .ed-tool-sep { flex: 1 1 auto; }
+.ed-tools .ed-tool-state { font-size: 12px; color: var(--ed-dim); }
+.ed-uploads { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.ed-uploads:empty { display: none; }
+.ed-up-item {
+  display: flex; gap: 9px; align-items: flex-start;
+  padding: 8px 10px; background: var(--ed-field);
+  border: 1px solid var(--ed-line); border-radius: var(--r-sm);
+}
+.ed-up-thumb {
+  flex: 0 0 auto; width: 54px; height: 54px; object-fit: cover;
+  border: 1px solid var(--ed-line); border-radius: var(--r-xs); background: #000;
+}
+.ed-up-ext {
+  flex: 0 0 auto; width: 54px; height: 54px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; color: var(--ed-ink);
+  background: rgba(255, 255, 255, .10);
+  border: 1px solid var(--ed-line); border-radius: var(--r-xs);
+}
+.ed-up-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ed-up-name {
+  font-size: 12.5px; color: var(--ed-ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ed-up-md {
+  font-family: var(--mono); font-size: 11.5px; color: var(--ed-dim);
+  background: rgba(0, 0, 0, .22); padding: 3px 7px; border-radius: var(--r-xs);
+  word-break: break-all; user-select: all;
+}
+.ed-up-acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.ed-up-acts button {
+  cursor: pointer; font: inherit; font-size: 11.5px; padding: 2px 9px;
+  color: var(--ed-ink); background: rgba(255, 255, 255, .10);
+  border: 1px solid var(--ed-line); border-radius: var(--r-xs);
+}
+.ed-up-acts button:hover { background: rgba(255, 255, 255, .22); }
+.ed-help { font-size: 12.5px; line-height: 1.75; color: var(--ed-dim); }
+.ed-help p { margin: 0 0 7px; }
+.ed-help code {
+  font-family: var(--mono); font-size: 11.5px; color: var(--ed-ink);
+  background: rgba(255, 255, 255, .10); padding: 1px 5px; border-radius: var(--r-xs);
+}
+.ed-drop { outline: 2px dashed var(--accent-2); outline-offset: -6px; }

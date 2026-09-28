@@ -18,6 +18,7 @@
   var chips = [].slice.call(document.querySelectorAll(".tag-chip[data-tag]"));
   var KEY = "petal.home.filter";
   var MIN_PER = 1, MAX_PER = 200, DEFAULT_PER = 12;   // 与 templates/index.html 的 min / max / value 对应
+  var DEFAULT_HIDES = ["unsafe"];                     // 默认就勾上「不显示不安全内容」
 
   var cards = [].slice.call(list.querySelectorAll(".post-card")).map(function (el, i) {
     var rawFlags = el.getAttribute("data-flags") || "";
@@ -32,7 +33,7 @@
     };
   });
 
-  var state = { hides: [], tags: [], per: DEFAULT_PER, page: 1 };
+  var state = { hides: DEFAULT_HIDES.slice(), tags: [], per: DEFAULT_PER, page: 1 };
   try {
     var saved = JSON.parse(localStorage.getItem(KEY) || "null");
     if (saved && typeof saved === "object") {
@@ -221,10 +222,12 @@
   }
   if (resetBtn) {
     resetBtn.addEventListener("click", function () {
-      state.hides = [];
+      state.hides = DEFAULT_HIDES.slice();      // 重置 = 回到默认（不安全仍然不显示）
       state.tags = [];
       state.page = 1;
-      boxes.forEach(function (b) { b.checked = false; });
+      boxes.forEach(function (b) {
+        b.checked = state.hides.indexOf(b.getAttribute("data-hide")) >= 0;
+      });
       save();
       render();
     });

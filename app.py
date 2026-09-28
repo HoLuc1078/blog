@@ -90,7 +90,12 @@ COMMENT_RATE = (20, 600)       # 同一 IP：10 分钟最多 20 次提交尝试�
 UNLOCK_RATE = (8, 600)         # 同一 IP：10 分钟最多 8 次口令尝试
 CAPTCHA_RATE = (60, 600)       # 同一 IP：10 分钟最多领 60 张验证码图（PIL 逐像素画图不便宜）
 
-MAX_UPLOAD = 8 * 1024 * 1024
+MAX_UPLOAD = 8 * 1024 * 1024              # 单个图片 / 普通附件
+MAX_UPLOAD_MEDIA = 64 * 1024 * 1024       # 单个视频 / 音频
+MAX_UPLOAD_FILES = 8                      # 一次最多几个文件
+UPLOAD_ROOT = os.path.join(BASE_DIR, "uploads")   # **刻意放在 static/ 之外**：
+                                          # 静态目录里的文件会被 Flask 按扩展名猜 MIME 直接内联，
+                                          # 放到外面才能统一走 /u/<路径> 这个受控出口
 
 # 文章标签（编辑页三个选框；首页可勾选"不显示…"并可按标签筛选，全部在前端完成）
 FLAGS = [
@@ -206,7 +211,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     PERMANENT_SESSION_LIFETIME=timedelta(days=30),
-    MAX_CONTENT_LENGTH=16 * 1024 * 1024,
+    MAX_CONTENT_LENGTH=80 * 1024 * 1024,      # 一次可带多个附件（单文件上限见 MAX_UPLOAD*）
 )
 
 
@@ -876,6 +881,73 @@ def captcha_ok(value):
 
 
 # ----------------------------------------------------------------------
+# :::charge 评论解锁（本站扩展）
+# ----------------------------------------------------------------------
+# 在本页评论过的人，cookie 里记一条 (文章 id, 评论 id, 签名)，之后就看得到 :::charge 里的正文。
+# cookie 是明文存在客户端的，**必须签名** —— 不然谁都能自己编一条「我评论过」的凭证，
+# 把付费 / 隐藏内容白嫖走。签名密钥用 app.secret_key（和会话同源，但不共享其内容）。
+CHARGE_COOKIE = "petal_unlock"
+CHARGE_MAX = 20                  # 最多同时记 20 篇文章，再多挤掉最旧的
+CHARGE_AGE = 400 * 24 * 3600     # 一年
+
+
+def _charge_sig(aid, cid):
+    key = app.secret_key
+    if isinstance(key, str):
+        key = key.encode("utf-8")
+    return hmac.new(key, ("charge:%s:%s" % (aid, cid)).encode("utf-8"),
+                    "sha256").hexdigest()[:16]
+
+
+def _charge_entries():
+    """解锁 cookie -> [(文章 id, 评论 id), …]；签名对不上的整条丢掉。"""
+    raw = request.cookies.get(CHARGE_COOKIE) or ""
+    out = []
+    for part in raw.split(",")[-CHARGE_MAX:]:
+        bits = part.split(":")
+        if len(bits) != 3 or not bits[0].isdigit() or not bits[1].isdigit():
+            continue
+        if hmac.compare_digest(bits[2], _charge_sig(bits[0], bits[1])):
+            out.append((int(bits[0]), int(bits[1])))
+    return out
+
+
+def charge_unlocked(aid):
+    """这位访客能不能看本篇 :::charge 的内容。
+
+    站长永远算解锁；游客必须在本页评论过，**而且那条评论还在**（被删了就不算数）。
+    """
+    if owner_unlocked():
+        return True
+    db = _db()
+    for art_id, cid in _charge_entries():
+        if art_id != aid:
+            continue
+        if db.execute("SELECT 1 FROM comments WHERE id=? AND article_id=?",
+                      (cid, aid)).fetchone():
+            return True
+    return False
+
+
+def charge_ctx(aid):
+    """传给 md_math.md_render 的渲染上下文。"""
+    return {"charge": charge_unlocked(aid)}
+
+
+def _grant_charge(resp, aid, cid):
+    """评论成功后：把「这篇文章已解锁」写进 cookie（每篇只留最新一条）。"""
+    entries = [(a, c) for a, c in _charge_entries() if a != aid]
+    entries.append((aid, cid))
+    resp.set_cookie(
+        CHARGE_COOKIE,
+        ",".join("%d:%d:%s" % (a, c, _charge_sig(a, c)) for a, c in entries[-CHARGE_MAX:]),
+        max_age=CHARGE_AGE, samesite="Lax", httponly=True,
+        secure=request_is_https(),
+    )
+    return resp
+
+
+# ----------------------------------------------------------------------
 # 页面
 # ----------------------------------------------------------------------
 @app.route("/")
@@ -930,7 +1002,7 @@ def article(aid):
         db.execute("UPDATE articles SET views=views+1 WHERE id=?", (aid,))
         db.commit()
         post["views"] = row["views"] + 1
-    body_html = md_math.md_render(row["content_md"])
+    body_html = md_math.md_render(row["content_md"], ctx=charge_ctx(aid))
     crows = db.execute(
         "SELECT id, parent_id, author_name, content, created_at FROM comments "
         "WHERE article_id=? ORDER BY created_at ASC, id ASC", (aid,)
@@ -1183,7 +1255,7 @@ def add_comment(aid):
             err = "slow"
     if err:
         return back(err)
-    db.execute(
+    cur = db.execute(
         "INSERT INTO comments(article_id, parent_id, author_name, ip, content) "
         "VALUES(?,?,?,?,?)",
         (aid, parent_id, name, ip_of(), content),
@@ -1193,7 +1265,8 @@ def add_comment(aid):
     resp = redirect(url_for("article", aid=aid) + "#comments")
     resp.set_cookie("petal_name", quote(name), max_age=30 * 24 * 3600,
                     samesite="Lax", httponly=False)
-    return resp
+    # 评论成功 = 本页 :::charge 解锁（把 (文章, 评论) 签名后记进 cookie）
+    return _grant_charge(resp, aid, cur.lastrowid)
 
 
 @app.route("/a/<int:aid>/comment/<int:cid>/delete", methods=["POST"])
@@ -1358,7 +1431,190 @@ def api_preview():
     md = payload.get("md") or ""
     if len(md) > MAX_CONTENT:
         return jsonify(error="正文过长"), 400
-    return jsonify(ok=True, html=md_math.md_render(md))
+    # 预览只有站长进得来：:::charge 一律按解锁渲染，写的时候就看得见自己藏了什么
+    return jsonify(ok=True, html=md_math.md_render(md, ctx={"charge": True}))
+
+
+# ----------------------------------------------------------------------
+# 附件上传（仅站长）
+# ----------------------------------------------------------------------
+# 扩展名 -> (类别, MIME)。**只认白名单**：.html / .svg / .js / .xml 这类能被浏览器
+# 当同源页面或脚本跑起来的一律不收，否则等于给自己开一个存储型 XSS 的上传口。
+UPLOAD_KINDS = {
+    "png": ("image", "image/png"),
+    "jpg": ("image", "image/jpeg"), "jpeg": ("image", "image/jpeg"),
+    "gif": ("image", "image/gif"), "webp": ("image", "image/webp"),
+    "bmp": ("image", "image/bmp"), "avif": ("image", "image/avif"),
+    "mp4": ("video", "video/mp4"), "m4v": ("video", "video/x-m4v"),
+    "mov": ("video", "video/quicktime"), "webm": ("video", "video/webm"),
+    "ogv": ("video", "video/ogg"),
+    "mp3": ("audio", "audio/mpeg"), "m4a": ("audio", "audio/mp4"),
+    "ogg": ("audio", "audio/ogg"), "wav": ("audio", "audio/wav"),
+    "pdf": ("file", "application/pdf"),
+    "zip": ("file", "application/zip"), "7z": ("file", "application/x-7z-compressed"),
+    "rar": ("file", "application/vnd.rar"), "tar": ("file", "application/x-tar"),
+    "gz": ("file", "application/gzip"),
+    "doc": ("file", "application/octet-stream"),
+    "docx": ("file", "application/octet-stream"),
+    "xls": ("file", "application/octet-stream"),
+    "xlsx": ("file", "application/octet-stream"),
+    "ppt": ("file", "application/octet-stream"),
+    "pptx": ("file", "application/octet-stream"),
+    "txt": ("file", "text/plain"),
+    "md": ("file", "text/plain"),
+    "csv": ("file", "text/csv"),
+    "json": ("file", "application/json"),
+    "log": ("file", "text/plain"),
+    "py": ("file", "text/plain"),
+    "c": ("file", "text/plain"),
+    "h": ("file", "text/plain"),
+    "cpp": ("file", "text/plain"),
+    "hpp": ("file", "text/plain"),
+    "java": ("file", "text/plain"),
+    "pas": ("file", "text/plain"),
+    "tex": ("file", "text/plain"),
+}
+# 存盘名固定是 <16 位十六进制>.<扩展名>，路径形态死板到不可能穿越
+_UPLOAD_REL_RE = re.compile(r"^\d{4}/\d{2}/[0-9a-f]{16}\.[a-z0-9]{1,5}$")
+# 扩展名别名：同一个真实类型可能有多个后缀
+_MAGIC_ALIAS = {"jpeg": "jpg", "m4v": "mp4", "mov": "mp4", "ogv": "ogg",
+                "m4a": "mp4", "docx": "zip", "xlsx": "zip", "pptx": "zip",
+                "7z": "7z", "tar": "tar"}
+
+
+def _magic_type(head):
+    """按文件头认出真实类型；认不出来返回空串。
+
+    扩展名是上传方说了算的，不能只信它 —— 尤其是图片 / 视频 / 音频这几类会**内联**回给
+    浏览器的，必须确认内容真的是那个东西。
+    """
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if head[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if head[:2] == b"BM":
+        return "bmp"
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "webp"
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "wav"
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return "avif" if head[8:12] in (b"avif", b"avis") else "mp4"
+    if head[:4] == b"\x1aE\xdf\xa3":
+        return "webm"
+    if head[:4] == b"OggS":
+        return "ogg"
+    if head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "mp3"
+    if head[:4] == b"%PDF":
+        return "pdf"
+    if head[:4] == b"PK\x03\x04":
+        return "zip"
+    if head[:6] == b"7z\xbc\xaf\x27\x1c":
+        return "7z"
+    if head[:4] == b"Rar!":
+        return "rar"
+    if head[:2] == b"\x1f\x8b":
+        return "gz"
+    return ""
+
+
+def _upload_ext(filename):
+    """取一个合法的小写扩展名；没有 / 不合法返回空串。"""
+    name = (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    if "." not in name:
+        return ""
+    ext = name.rsplit(".", 1)[-1].strip().lower()
+    return ext if re.fullmatch(r"[a-z0-9]{1,5}", ext) else ""
+
+
+def _upload_basename(filename, keep_ext):
+    """展示名：去掉路径分隔符与控制字符，限量 120 字。"""
+    name = (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    name = re.sub(r"[\r\n\t]+", " ", name).strip()[:120]
+    if not keep_ext and "." in name:
+        name = name.rsplit(".", 1)[0]
+    return name or "文件"
+
+
+def api_upload():
+    """/api/upload —— 仅站长。一次可传多个，逐个落盘并给出 Markdown / 直链。"""
+    gate = _required_owner()
+    if gate:
+        return gate
+    files = [f for f in request.files.getlist("file") if f and f.filename]
+    if not files:
+        return jsonify(error="没有收到文件"), 400
+    if len(files) > MAX_UPLOAD_FILES:
+        return jsonify(error="一次最多上传 %d 个文件" % MAX_UPLOAD_FILES), 400
+    rel_dir = datetime.now(BJ_TZ).strftime("%Y/%m")
+    target_dir = os.path.join(UPLOAD_ROOT, *rel_dir.split("/"))
+    out = []
+    for f in files:
+        ext = _upload_ext(f.filename)
+        kind, mime = UPLOAD_KINDS.get(ext, ("", ""))
+        if not kind:
+            return jsonify(error="「%s」的类型不支持上传" % _upload_basename(f.filename, True)), 400
+        limit = MAX_UPLOAD_MEDIA if kind in ("video", "audio") else MAX_UPLOAD
+        data = f.read(limit + 1)
+        if len(data) > limit:
+            return jsonify(error="「%s」超过 %dMB" % (_upload_basename(f.filename, True),
+                                                     limit // 1024 // 1024)), 400
+        if not data:
+            return jsonify(error="「%s」是空文件" % _upload_basename(f.filename, True)), 400
+        if kind != "file":        # 会内联回浏览器的几类：内容必须和扩展名对得上
+            real = _magic_type(data[:64])
+            if not real or _MAGIC_ALIAS.get(ext, ext) != real:
+                return jsonify(error="「%s」的内容与扩展名不符" %
+                                      _upload_basename(f.filename, True)), 400
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except OSError:
+            return jsonify(error="服务器无法创建上传目录"), 500
+        fname = secrets.token_hex(8) + "." + ext
+        with open(os.path.join(target_dir, fname), "wb") as fh:
+            fh.write(data)
+        url = "/u/%s/%s" % (rel_dir, fname)
+        if kind == "image":
+            label = _upload_basename(f.filename, False)
+            md = "![%s](%s)" % (label, url)
+        elif kind in ("video", "audio"):
+            label = _upload_basename(f.filename, False)
+            md = "~[%s](%s)" % (label, url)
+        else:
+            label = _upload_basename(f.filename, True)
+            md = "*[%s](%s)" % (label, url)
+        out.append({"url": url, "abs_url": request.url_root.rstrip("/") + url,
+                    "name": _upload_basename(f.filename, True), "label": label,
+                    "ext": ext, "kind": kind, "mime": mime, "size": len(data),
+                    "markdown": md})
+    return jsonify(ok=True, files=out)
+
+
+app.add_url_rule("/api/upload", "api_upload", api_upload, methods=["POST"])
+
+
+@app.route("/u/<path:rel>")
+def upload_file(rel):
+    """附件的唯一出口：路径形态写死，普通附件一律 attachment 强制下载。
+
+    上传目录刻意不在 static/ 下 —— Flask 的静态路由会按扩展名猜 MIME 直接内联，
+    那样一个 .txt 也可能被当成页面渲染。这里只有图片 / 音频 / 视频内联，其余全下载。
+    """
+    if not _UPLOAD_REL_RE.match(rel or ""):
+        abort(404)
+    ext = rel.rsplit(".", 1)[-1].lower()
+    kind, mime = UPLOAD_KINDS.get(ext, ("file", "application/octet-stream"))
+    try:
+        resp = send_from_directory(UPLOAD_ROOT, rel, mimetype=mime, conditional=True)
+    except Exception:
+        abort(404)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Disposition"] = "inline" if kind != "file" else "attachment"
+    resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    return resp
 
 
 # ----------------------------------------------------------------------
@@ -1424,6 +1680,9 @@ CSP = (
     "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
     "img-src 'self' data: https: http:; "   # 正文里的站外图片要能直接显示；
                                              # 评论走严格净化，站外图是点击后才加载
+    "media-src 'self' https: http: blob:; "   # ~[标题](视频直链) 的 <video>
+    "frame-src https://player.bilibili.com https://www.youtube.com "
+    "https://www.youtube-nocookie.com; "      # ~[标题](B站/YouTube) 的内嵌播放器
     "font-src 'self' data: https://cdn.jsdelivr.net; "
     "connect-src 'self'; "
     "object-src 'none'; base-uri 'none'; form-action 'self'; "

@@ -5,3 +5,4 @@ blog.db
 *.bak-*
 .secret_key
 On_server/
+uploads/

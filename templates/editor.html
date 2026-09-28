@@ -46,8 +46,23 @@
         <button type="button" class="tab-btn" data-tab="preview">预览</button>
       </div>
 
+      <!-- 附件工具条：上传（仅站长）/ 快捷插入扩展语法；粘贴或拖入图片会自动上传 -->
+      <div class="ed-tools" id="edTools">
+        <button type="button" class="ed-tool" id="edToolUpload">上传附件</button>
+        <button type="button" class="ed-tool" id="edToolImage">插入图片</button>
+        <button type="button" class="ed-tool" id="edToolVideo">插入视频</button>
+        <button type="button" class="ed-tool" id="edToolFile">插入文件</button>
+        <button type="button" class="ed-tool" id="edToolCharge">评论解锁</button>
+        <span class="ed-tool-sep"></span>
+        <span class="ed-tool-state" id="edToolState"></span>
+      </div>
+      <input type="file" id="edFileInput" hidden multiple
+             accept="image/*,video/*,audio/*,.pdf,.zip,.7z,.rar,.gz,.tar,.txt,.md,.csv,.json,.log,.py,.c,.h,.cpp,.hpp,.java,.pas,.tex,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
+
       <textarea id="edContent" class="ed-content" spellcheck="false"
-                placeholder="正文">{% if post %}{{ post.content_md }}{% endif %}</textarea>
+                placeholder="正文（可直接把图片粘贴进来，会自动上传并插入 Markdown）">{% if post %}{{ post.content_md }}{% endif %}</textarea>
+
+      <div class="ed-uploads" id="edUploads"></div>
 
       <div class="ed-preview md-body" id="edPreview" hidden></div>
 
@@ -111,6 +126,17 @@
           <label class="chk"><input type="checkbox" class="ed-flag" value="{{ key }}"
             {% if post and key in (post.flags or '').split(',') %}checked{% endif %}><span>{{ label }}</span></label>
           {% endfor %}
+        </div>
+      </div>
+
+      <div class="glass side-card">
+        <h4 class="side-title">扩展语法</h4>
+        <div class="ed-help">
+          <p><code>![说明](地址)</code> 图片：按屏幕缩放，点一下可放大看原图。</p>
+          <p><code>~[标题](地址)</code> 视频：B 站 / YouTube 链接自动转内嵌播放器，<code>.mp4</code> 等直链用原生播放器。</p>
+          <p><code>*[文件名](地址)</code> 文件：渲染成下载卡片，点击即下载。</p>
+          <p><code>:::</code> <code>charge[标题]</code> ＋ 正文 ＋ <code>:::</code> 评论解锁：没在本页评论过的访客看不到里面的内容。</p>
+          <p class="dim">粘贴或拖入图片会自动上传；上传后这里会给出 Markdown 与直链。</p>
         </div>
       </div>
 

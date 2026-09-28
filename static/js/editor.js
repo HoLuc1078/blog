@@ -366,6 +366,220 @@
   var save2 = $("edSave2");
   if (save2) save2.addEventListener("click", function () { send("draft"); });
 
+  /* ---------- 附件上传（仅站长）：粘贴 / 拖入图片会自动上传并插入 Markdown ---------- */
+  var uploadsEl = $("edUploads");
+  var toolStateEl = $("edToolState");
+  var fileInputEl = $("edFileInput");
+  var uploadBusy = 0;
+
+  function csrf() {
+    var m = document.querySelector('meta[name="csrf-token"]');
+    return m ? m.getAttribute("content") : "";
+  }
+
+  function fmtSize(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+    return (n / 1024 / 1024).toFixed(2) + " MB";
+  }
+
+  function copyText(text, okMsg) {
+    function done() { toast(okMsg || "已复制", "ok"); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
+    } else fallbackCopy(text, done);
+  }
+  function fallbackCopy(text, done) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); done(); } catch (e) { toast("复制失败", "err"); }
+    ta.remove();
+  }
+
+  /* 插入文本并选中其中一段（占位符可直接被覆盖输入） */
+  function insertTemplate(tpl, selFrom, selTo) {
+    var v = contentEl.value, s = contentEl.selectionStart, e = contentEl.selectionEnd;
+    contentEl.value = v.slice(0, s) + tpl + v.slice(e);
+    setTab("edit");
+    contentEl.focus();
+    if (selFrom == null) selFrom = tpl.length;
+    if (selTo == null) selTo = selFrom;
+    contentEl.setSelectionRange(s + selFrom, s + selTo);
+    onInput();
+  }
+
+  function setToolState() {
+    if (!toolStateEl) return;
+    toolStateEl.textContent = uploadBusy ? "正在上传 " + uploadBusy + " 个文件…" : "";
+  }
+
+  function addUploadItem(f) {
+    if (!uploadsEl) return;
+    var row = document.createElement("div");
+    row.className = "ed-up-item";
+    var head;
+    if (f.kind === "image") {
+      head = document.createElement("img");
+      head.className = "ed-up-thumb";
+      head.src = f.url;
+      head.alt = "";
+    } else {
+      head = document.createElement("span");
+      head.className = "ed-up-ext";
+      head.textContent = String(f.ext || "file").toUpperCase().slice(0, 4);
+    }
+    var body = document.createElement("div");
+    body.className = "ed-up-body";
+    var name = document.createElement("div");
+    name.className = "ed-up-name";
+    name.textContent = (f.name || "文件") + " · " + fmtSize(f.size);
+    var md = document.createElement("div");
+    md.className = "ed-up-md";
+    md.textContent = f.markdown;
+    var acts = document.createElement("div");
+    acts.className = "ed-up-acts";
+    function act(label, fn) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.addEventListener("click", fn);
+      return b;
+    }
+    acts.appendChild(act("插入正文", function () { insertTemplate(f.markdown + "\n"); }));
+    acts.appendChild(act("复制 Markdown", function () { copyText(f.markdown, "Markdown 已复制"); }));
+    acts.appendChild(act("复制直链", function () { copyText(f.abs_url || f.url, "直链已复制"); }));
+    body.appendChild(name);
+    body.appendChild(md);
+    body.appendChild(acts);
+    row.appendChild(head);
+    row.appendChild(body);
+    uploadsEl.insertBefore(row, uploadsEl.firstChild);
+    while (uploadsEl.children.length > 8) uploadsEl.removeChild(uploadsEl.lastChild);
+  }
+
+  function uploadFiles(files, autoInsert) {
+    if (!files || !files.length) return;
+    var fd = new FormData();
+    for (var i = 0; i < files.length; i++) {
+      fd.append("file", files[i], files[i].name || ("paste-" + Date.now() + ".png"));
+    }
+    uploadBusy++;
+    setToolState();
+    fetch("/api/upload", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "X-CSRF-Token": csrf() },
+      body: fd
+    }).then(function (res) {
+      return res.json().catch(function () { return {}; });
+    }).then(function (j) {
+      uploadBusy--;
+      setToolState();
+      if (!j.ok || !j.files || !j.files.length) {
+        if (j.need_owner) { toast("站长口令未解锁", "err"); return; }
+        toast(j.error || "上传失败", "err");
+        return;
+      }
+      j.files.forEach(addUploadItem);
+      if (autoInsert) {
+        insertTemplate(j.files.map(function (f) { return f.markdown; }).join("\n") + "\n");
+      }
+      toast("已上传 " + j.files.length + " 个文件", "ok");
+    }).catch(function () {
+      uploadBusy--;
+      setToolState();
+      toast("网络错误，上传失败", "err");
+    });
+  }
+
+  /* 粘贴：剪贴板里有图片就自动上传（纯文本粘贴照旧交给浏览器） */
+  contentEl.addEventListener("paste", function (e) {
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    var files = [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === "file" && /^image\//i.test(items[i].type || "")) {
+        var fl = items[i].getAsFile();
+        if (fl) files.push(fl);
+      }
+    }
+    if (!files.length) return;
+    e.preventDefault();
+    uploadFiles(files, true);
+  });
+
+  /* 拖拽：把文件拖到编辑区也会上传 */
+  function hasFiles(dt) {
+    if (!dt) return false;
+    var t = dt.types || [];
+    for (var i = 0; i < t.length; i++) { if (t[i] === "Files") return true; }
+    return false;
+  }
+  contentEl.addEventListener("dragenter", function (e) {
+    if (!hasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    contentEl.classList.add("ed-drop");
+  });
+  contentEl.addEventListener("dragover", function (e) {
+    if (!hasFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    contentEl.classList.add("ed-drop");
+  });
+  contentEl.addEventListener("dragleave", function () { contentEl.classList.remove("ed-drop"); });
+  contentEl.addEventListener("drop", function (e) {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    contentEl.classList.remove("ed-drop");
+    uploadFiles(e.dataTransfer.files, true);
+  });
+
+  /* 工具条按钮 */
+  var toolUpload = $("edToolUpload");
+  if (toolUpload && fileInputEl) {
+    toolUpload.addEventListener("click", function () { fileInputEl.click(); });
+  }
+  if (fileInputEl) {
+    fileInputEl.addEventListener("change", function () {
+      uploadFiles(this.files, false);
+      this.value = "";
+    });
+  }
+  var toolImage = $("edToolImage");
+  if (toolImage) {
+    toolImage.addEventListener("click", function () {
+      var tpl = "![说明](图片地址)";
+      insertTemplate(tpl, tpl.indexOf("图片地址"), tpl.indexOf("图片地址") + 4);
+    });
+  }
+  var toolVideo = $("edToolVideo");
+  if (toolVideo) {
+    toolVideo.addEventListener("click", function () {
+      var tpl = "~[视频标题](视频地址)";
+      insertTemplate(tpl, tpl.indexOf("视频地址"), tpl.indexOf("视频地址") + 4);
+    });
+  }
+  var toolFile = $("edToolFile");
+  if (toolFile) {
+    toolFile.addEventListener("click", function () {
+      var tpl = "*[文件名](文件地址)";
+      insertTemplate(tpl, tpl.indexOf("文件地址"), tpl.indexOf("文件地址") + 4);
+    });
+  }
+  var toolCharge = $("edToolCharge");
+  if (toolCharge) {
+    toolCharge.addEventListener("click", function () {
+      var v = contentEl.value, s = contentEl.selectionStart, e = contentEl.selectionEnd;
+      var sel = v.slice(s, e) || "这里写要藏起来的正文";
+      var tpl = ":::charge[评论后可见]\n" + sel + "\n:::";
+      var pad = (s > 0 && v[s - 1] !== "\n" ? "\n\n" : "") + tpl + "\n\n";
+      insertTemplate(pad, pad.indexOf(sel), pad.indexOf(sel) + sel.length);
+    });
+  }
+
   /* ---------- 启动 ---------- */
   renderTags();
   setIcon(iconEl ? iconEl.value : "");

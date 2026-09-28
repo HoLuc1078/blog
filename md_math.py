@@ -20,6 +20,10 @@ Markdown 语法，外加本站原有的 LaTeX 支持。
 ✅ 题记：`:::epigraph[——署名]`（署名移到末尾并右对齐）
 ✅ 反 AI 水印：`::anti-ai[隐藏文字]`（不可见，但复制时会带走）
 ✅ 表格样式：`::cute-table{tuack|three}[表 1]`
+✅ 视频（本站扩展）：`~[标题](地址)` → 直链视频走 <video>；B 站 / YouTube 自动转内嵌播放器
+✅ 文件卡片（本站扩展）：`*[文件名](地址)` → 卡片样式，点击即下载
+✅ 评论解锁（本站扩展）：`:::charge[标题]` —— 没在本页评论过的访客看不到内部内容，
+   而且锁定时内部内容**根本不进 HTML**（不是用 CSS 遮住），查看源码也拿不到
 ✅ 引用、列表、标题、分隔线、行内代码、自动链接、段内换行（行末两空格或 `\`）
 ✅ 数学：`$..$`、`$$..$$`，以及本站额外支持的 `\\(..\\)`、`\\[..\\]`
 ❌ 上标 `^x^` / 下标 `~x~` / 高亮 `==x==` / `->居中<-` / `[TOC]` / 定义列表 /
@@ -28,8 +32,8 @@ Markdown 语法，外加本站原有的 LaTeX 支持。
 渲染顺序
 --------
 1. `_split_containers()`  先摘出块级容器 / 叶子指令（可递归：容器内仍是完整 Markdown）
-2. `protect()`            摘出行内代码 → 数学 → 删除线 → 自动链接（代码与公式内部的
-                          `$`、`~~`、URL 一律原样保留）
+2. `protect()`            摘出行内代码 → 数学 → 视频 / 文件卡片 → 删除线 → 自动链接
+                          （代码与公式内部的 `$`、`~~`、URL 一律原样保留）
 3. `python-markdown`      渲染普通 Markdown（fenced_code / tables / footnotes / attr_list…）
 4. `_LuoguTreeprocessor`  任务列表、表格合并、colgroup、cute-table 包裹
 5. `_LuoguPostprocessor`  代码块行号 / 区间高亮（拆行成 <span class="md-line">）
@@ -44,8 +48,14 @@ Markdown 语法，外加本站原有的 LaTeX 支持。
 \\uE002{i}\\uE003   行内代码
 \\uE004{i}\\uE005   预渲染容器 HTML（净化后回填，内容已在递归时净化过）
 \\uE006{i}\\uE007   cute-table 指令（交给 treeprocessor 包裹后面的表格）
+\\uE008{i}\\uE009   视频 / 文件卡片（本站扩展）
 
-这些字符只该由渲染器产生，所以 `md_render()` 入口会把用户输入里的 \\uE000~\\uE007
+为什么视频 / 文件卡片要单独占一段，而不是跟着容器一起用 \\uE004/\\uE005：
+容器是 `_split_containers` 里**另一个** `_TokenStore` 实例产出的，两边序号都从 0 开始。
+两类东西共用一段字符时，第 0 个容器和第一个视频会生成**一模一样的 token**，回填时先到的赢，
+后面的内容被整个顶掉（实测：带视频的文章里 :::charge 会整块消失）。各占一段就不会撞。
+
+这些字符只该由渲染器产生，所以 `md_render()` 入口会把用户输入里的 \\uE000~\\uE009
 **全部删掉**（见 `_TOKEN_CHARS`）。不删的后果（实测过的存储型 XSS）：`_restore()`
 是在 `sanitize()` **之后**把占位符原样换成 HTML 的，而回填串自带引号
 （`<span class="math …">`、`<details class="md-block …">`）——用户只要在链接 /
@@ -72,10 +82,12 @@ H_BEGIN = "\uE004"
 H_END = "\uE005"
 K_BEGIN = "\uE006"
 K_END = "\uE007"
+V_BEGIN = "\uE008"
+V_END = "\uE009"
 
 # 上面这些是渲染器内部占位符，用户输入里出现的一律视为伪造，渲染入口直接剥掉。
 # 不剥就能在链接 / 图片的属性位置引用 token，回填时闭合引号 → 属性注入 XSS。
-_TOKEN_CHARS = re.compile("[\uE000-\uE007]")
+_TOKEN_CHARS = re.compile("[\uE000-\uE009]")
 
 # ----------------------------------------------------------------------
 # 行级语法
@@ -104,6 +116,12 @@ _CUTE_STYLES = ("tuack", "three")
 
 _LINES_SPEC = re.compile(r"^[0-9][0-9,\-\s]*$")
 _ATTR_OK = re.compile(r"^[A-Za-z_][\w\-]*$")
+
+# 本站扩展指令：`~[标题](地址)` 视频、`*[文件名](地址)` 文件卡片。
+# 前面紧跟 `~` / `*` / 反斜杠的一律不匹配 —— 否则 `~~删除线~~`、`**粗体**`、
+# `\*转义\*` 会被误伤。地址里不允许空白 / 括号 / 引号，省得属性位置被闭合。
+_VIDEO_RE = re.compile(r"(?<![~\\])~\[([^\]\n]{0,120})\]\([ \t]*([^\s()<>\"']{1,2000})[ \t]*\)")
+_FILE_RE = re.compile(r"(?<![*\\])\*\[([^\]\n]{0,200})\]\([ \t]*([^\s()<>\"']{1,2000})[ \t]*\)")
 
 
 def _backslash_run(text, pos):
@@ -178,11 +196,11 @@ def _attr_flags(raw):
     return {t.split("=", 1)[0].lower() for t in toks}, toks
 
 
-def _inline_md(text, strict=False):
+def _inline_md(text, strict=False, ctx=None):
     """把一行文字当「行内 Markdown」渲染，并去掉最外层 <p>（标题、容器标题用）。"""
     if not text:
         return ""
-    html = md_render(text, strict=strict)
+    html = md_render(text, strict=strict, ctx=ctx)
     m = re.match(r"^<p>(.*)</p>\s*$", html, re.S)
     return m.group(1) if m else html
 
@@ -206,6 +224,8 @@ class _TokenStore:
         elif kind == "cute":
             token = f"{K_BEGIN}{i}{K_END}"
             self.cute[i] = raw
+        elif kind == "media":
+            token = f"{V_BEGIN}{i}{V_END}"
         else:
             token = f"{H_BEGIN}{i}{H_END}"
         self.map[token] = (kind, raw)
@@ -291,7 +311,155 @@ def _plain_box_html(name, title, inner_html):
     )
 
 
-def _render_container(name, label, attrs_raw, inner_lines, strict):
+# :::charge 锁定态的小锁（内联 SVG，不依赖任何图标 sprite）
+_LOCK_SVG = (
+    '<svg class="md-charge-lock" viewBox="0 0 24 24" aria-hidden="true" '
+    'focusable="false"><path d="M7.5 10V7.4a4.5 4.5 0 0 1 9 0V10" fill="none" '
+    'stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>'
+    '<rect x="4.6" y="10" width="14.8" height="10.4" rx="1.6" fill="none" '
+    'stroke="currentColor" stroke-width="1.9"/></svg>')
+
+
+def _charge_open(ctx):
+    """:::charge 是否对当前访客解锁。
+
+    ctx 由调用方（app.py）算好传进来：{"charge": True} 表示「这个人在本页评论过（或是站长）」。
+    默认（ctx 为空）一律锁着 —— 少传一个参数顶多看不到内容，不会反过来漏内容。
+    """
+    return bool(ctx and ctx.get("charge"))
+
+
+# ---- 本站扩展：~[标题](地址) 视频 / *[文件名](地址) 文件卡片 ----
+_VIDEO_EXT = (".mp4", ".webm", ".ogv", ".ogg", ".mov", ".m4v", ".mkv")
+_BILI_BV = re.compile(r"(?i)bilibili\.com/video/(BV[0-9A-Za-z]{8,12})")
+_BILI_AV = re.compile(r"(?i)bilibili\.com/video/av(\d{1,12})")
+_YT_ID = re.compile(
+    r"(?i)(?:youtube(?:-nocookie)?\.com/(?:watch\?[^#\s]*?\bv=|embed/|shorts/|live/)"
+    r"|youtu\.be/)([A-Za-z0-9_-]{6,20})")
+_FILE_EXT_RE = re.compile(r"\.([A-Za-z0-9]{1,8})(?:$|[?#])")
+_REL_URL = re.compile(r"^(?:\.{0,2}/)")
+
+
+def _safe_url(u):
+    """指令里的地址：只放行 http(s) 与站内相对路径，并挡掉引号 / 尖括号 / 空白。
+
+    这些标签是「净化后回填」的（见文件头），拼串时让引号进来就能闭合属性值，
+    所以不合法字符整条拒掉，而不是转义了事。
+    """
+    u = (u or "").strip()
+    if not u or len(u) > 2000:
+        return ""
+    if any(c in u for c in "\"'<>\u0060") or any(c.isspace() for c in u):
+        return ""
+    if _SCHEME_RE.match(u):
+        return u if re.match(r"(?i)^https?://", u) else ""
+    if u.startswith("//") or not _REL_URL.match(u):
+        return ""
+    return u
+
+
+def _esc_attr(v):
+    return (v or "").replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+
+
+def _media_link_card(label, url, kind, tip):
+    """没法内嵌（或不许内嵌）时退化成的外链卡片。"""
+    return (
+        '<div class="md-file md-file-link">'
+        f'<span class="md-file-ext">{_esc_text(kind)}</span>'
+        '<span class="md-file-main">'
+        f'<a class="md-file-name" href="{_esc_attr(url)}" target="_blank" '
+        f'rel="noopener noreferrer">{_esc_text(label)}</a>'
+        f'<span class="md-file-sub">{_esc_text(tip)}</span>'
+        "</span></div>"
+    )
+
+
+def _video_html(label, url, strict=False):
+    """~[标题](地址) -> 播放器 / 外链卡片；地址不合法返回 None（原样留着）。"""
+    u = _safe_url(url)
+    if not u:
+        return None
+    cap = (label or "").strip() or "视频"
+    if strict:
+        # 评论里不内嵌：外站 iframe 与 <video> 都会自动去拉第三方资源
+        return _media_link_card(cap, u, "视频", "点击观看")
+    low = u.split("?")[0].split("#")[0].lower()
+    if low.endswith(_VIDEO_EXT):
+        return ('<figure class="md-video">'
+                f'<video class="md-video-el" controls preload="metadata" playsinline '
+                f'src="{_esc_attr(u)}"></video>'
+                f'<figcaption class="md-video-cap">{_esc_text(cap)}</figcaption></figure>')
+    src = ""
+    m = _BILI_BV.search(u)
+    if m:
+        src = ("https://player.bilibili.com/player.html?bvid=" + m.group(1) +
+               "&autoplay=0&high_quality=1")
+    if not src:
+        m = _BILI_AV.search(u)
+        if m:
+            src = ("https://player.bilibili.com/player.html?aid=" + m.group(1) +
+                   "&autoplay=0&high_quality=1")
+    if not src:
+        m = _YT_ID.search(u)
+        if m:
+            src = "https://www.youtube-nocookie.com/embed/" + m.group(1)
+    if not src:
+        return _media_link_card(cap, u, "视频", "点击观看")
+    return ('<figure class="md-video md-video-embed">'
+            f'<div class="md-video-frame"><iframe src="{_esc_attr(src)}" loading="lazy" '
+            'allowfullscreen scrolling="no" frameborder="0" '
+            'referrerpolicy="no-referrer"></iframe></div>'
+            f'<figcaption class="md-video-cap">{_esc_text(cap)}</figcaption></figure>')
+
+
+def _file_html(label, url):
+    """*[文件名](地址) -> 下载卡片；地址不合法返回 None（原样留着）。"""
+    u = _safe_url(url)
+    if not u:
+        return None
+    name = re.sub(r"[\\/\r\n\t]+", " ", label or "").strip()[:120]
+    if not name:
+        name = u.rsplit("/", 1)[-1].split("?")[0].split("#")[0][:120] or "下载文件"
+    m = _FILE_EXT_RE.search(u)
+    ext = m.group(1).upper() if m else "FILE"
+    if len(ext) > 4:
+        ext = "FILE"
+    href = _esc_attr(u)
+    dl = _esc_attr(name)
+    return (
+        '<div class="md-file">'
+        f'<span class="md-file-ext">{_esc_text(ext)}</span>'
+        '<span class="md-file-main">'
+        f'<a class="md-file-name" href="{href}" download="{dl}" target="_blank" '
+        f'rel="noopener noreferrer">{_esc_text(name)}</a>'
+        '<span class="md-file-sub">点击下载</span>'
+        "</span>"
+        f'<a class="md-file-btn" href="{href}" download="{dl}" target="_blank" '
+        'rel="noopener noreferrer">下载</a>'
+        "</div>"
+    )
+
+
+def _substitute_media(text, store, strict=False):
+    """把 `~[标题](地址)` / `*[文件名](地址)` 摘成预渲染 HTML 代理。
+
+    此时行内代码与公式都已经换成私有占位符，所以代码 / 公式里的 `~` `*` 不会误伤。
+    """
+    def make(src, m, kind):
+        if _backslash_run(src, m.start()) % 2 == 1:     # \~[x](y) 保持字面量
+            return m.group(0)
+        html = (_video_html(m.group(1), m.group(2), strict) if kind == "video"
+                else _file_html(m.group(1), m.group(2)))
+        # 必须是 media 而不是 html：html token 与 _split_containers 产出的容器 token 是同一段
+        # 字符，两个 store 的序号都从 0 起，会撞成同一个 token 把内容顶掉（详见文件头）
+        return store.new("media", html) if html else m.group(0)
+
+    out = _VIDEO_RE.sub(lambda m: make(text, m, "video"), text)
+    return _FILE_RE.sub(lambda m: make(out, m, "file"), out)
+
+
+def _render_container(name, label, attrs_raw, inner_lines, strict, ctx=None):
     """渲染一个 :::type 容器，返回要回填的 HTML。"""
     flags, toks = _attr_flags(attrs_raw)
     lname = name.lower()
@@ -307,29 +475,41 @@ def _render_container(name, label, attrs_raw, inner_lines, strict):
                 break
         if not direction:
             direction = "center"      # 洛谷只认属性键；给个合理兜底
-        body = md_render(inner_md, strict=strict)
+        body = md_render(inner_md, strict=strict, ctx=ctx)
         return f'<div class="md-align md-align-{direction}">{body}</div>'
 
     # ---- 题记：署名挪到最后一行并右对齐 ----
     if lname == "epigraph":
-        body = md_render(inner_md, strict=strict)
-        src = _inline_md(label, strict=strict) if label else ""
+        body = md_render(inner_md, strict=strict, ctx=ctx)
+        src = _inline_md(label, strict=strict, ctx=ctx) if label else ""
         tail = f'<p class="md-epigraph-src">{src}</p>' if src else ""
         cls = "epigraph has-source" if src else "epigraph"
         return f'<div class="{cls}">{body}{tail}</div>'
 
+    # ---- :::charge 评论后可见（本站扩展）：锁着时内部内容根本不进 HTML ----
+    if lname == "charge" and not strict:
+        title = _inline_md(label, strict=strict, ctx=ctx) if label else "评论后可见"
+        head = f'<div class="md-charge-head">{_LOCK_SVG}<span class="md-charge-tag">{title}</span></div>'
+        if _charge_open(ctx):
+            return ('<div class="md-charge md-charge-open">' + head +
+                    '<div class="md-charge-body">' +
+                    md_render(inner_md, strict=strict, ctx=ctx) + "</div></div>")
+        return ('<div class="md-charge md-charge-lock">' + head +
+                '<div class="md-charge-tip">本条内容需要在本页发表一条评论后才能查看</div>'
+                '<a class="md-charge-btn" href="#comments">去评论区解锁</a></div>')
+
     # ---- info / success / warning / error：洛谷认的四个类型 ----
     if lname in CONTAINER_TYPES:
-        title = _inline_md(label, strict=strict) if label else CONTAINER_TYPES[lname]
-        return _details_html(lname, title, md_render(inner_md, strict=strict),
+        title = _inline_md(label, strict=strict, ctx=ctx) if label else CONTAINER_TYPES[lname]
+        return _details_html(lname, title, md_render(inner_md, strict=strict, ctx=ctx),
                              "open" in flags)
 
     # ---- 其它名字：朴素盒子，标题取 [..] 或用类型名 ----
-    title = _inline_md(label, strict=strict) if label else _esc_text(name.upper())
-    return _plain_box_html(lname, title, md_render(inner_md, strict=strict))
+    title = _inline_md(label, strict=strict, ctx=ctx) if label else _esc_text(name.upper())
+    return _plain_box_html(lname, title, md_render(inner_md, strict=strict, ctx=ctx))
 
 
-def _split_containers(content, store, strict=False):
+def _split_containers(content, store, strict=False, ctx=None):
     """把 :::容器 / ::叶子指令 摘成 HTML 代理，返回剩余可交给 protect 的文本。"""
     lines = content.split("\n")
     res = []
@@ -373,7 +553,7 @@ def _split_containers(content, store, strict=False):
             end, inner = _block_span(lines, i)
             if extra:                 # `:::info 标题`：多余文字当正文首行
                 inner.insert(0, extra)
-            html = _render_container(name, label, attrs, inner, strict)
+            html = _render_container(name, label, attrs, inner, strict, ctx)
             token = store.new("html", html)
             res.append("")
             res.append(token)
@@ -531,7 +711,7 @@ def _apply_inline_extras(text):
     return _AUTOLINK.sub(_link, text)
 
 
-def protect(content):
+def protect(content, strict=False):
     """输入整篇 Markdown，返回 (受保护文本, token 表)。"""
     store = _TokenStore()
     pieces = []
@@ -582,7 +762,9 @@ def protect(content):
         segment = "".join(code_parts)
         # 2) 数学
         segment = _substitute_math(segment, store)
-        # 3) 删除线 / 自动链接
+        # 3) 视频 ~[标题](地址) / 文件卡片 *[文件名](地址)（本站扩展）
+        segment = _substitute_media(segment, store, strict)
+        # 4) 删除线 / 自动链接
         segment = _apply_inline_extras(segment)
         final_parts.append(segment)
     return "\n".join(final_parts), store
@@ -1140,10 +1322,14 @@ def _engine():
     return md, ext
 
 
-def md_render(content, strict=False):
+def md_render(content, strict=False, ctx=None):
     """整篇 Markdown + LaTeX -> 安全 HTML（数学留 span 由前端 KaTeX 渲染）。
 
     strict=True 用于评论等访客可写内容：禁站外图片、强制 rel、收紧类名。
+
+    ctx 是「这一页渲染时的上下文」，目前只有 `{"charge": True/False}` 一项：
+    :::charge 里的内容有没有对该访客解锁。**默认（None / 少传）一律锁着** ——
+    漏传只会让人看不到内容，不会反过来把锁着的内容漏出去。
 
     入口先把用户输入里的代理字符（\uE000~\uE007）删掉：它们是渲染器的内部占位符，
     留在正文里就能在属性位置引用 token，由 _restore() 回填时闭合引号 → 属性注入 XSS。
@@ -1153,17 +1339,17 @@ def md_render(content, strict=False):
     text = _TOKEN_CHARS.sub("", content.replace("\r\n", "\n").replace("\r", "\n"))
 
     hstore = _TokenStore()
-    md_text = _split_containers(text, hstore, strict=strict)
-    protected, store = protect(md_text)
+    md_text = _split_containers(text, hstore, strict=strict, ctx=ctx)
+    protected, store = protect(md_text, strict=strict)
     engine, ext = _engine()
     # 实例是复用的，必须手动 reset：否则上一个文档的脚注 / 引用定义会漏到下一篇
     engine.reset()
     ext.cute_map.clear()
     ext.cute_map.update(hstore.cute)      # 供 treeprocessor 包裹后面的表格
     html_text = engine.convert(protected)
-    # 容器代理若被单独包进 <p>，把该 <p> 去掉（容器是块级元素）
-    for token in hstore.map:
-        if hstore.map[token][0] == "html":
+    # 块级代理（容器 / 视频 / 文件卡片）若被单独包进 <p>，把该 <p> 去掉
+    for token, (kind, _raw) in list(hstore.map.items()) + list(store.map.items()):
+        if kind in ("html", "media"):
             html_text = html_text.replace(f"<p>{token}</p>", token)
     safe = sanitize(html_text, strict=strict)
     out = _restore(safe, store)
@@ -1180,6 +1366,7 @@ def plain_excerpt(content, limit=150):
     text = re.sub(r"~~~.*?~~~", " ", text, flags=re.S)
     text = re.sub(r"`{1,3}[^`\n]*`{1,3}", " ", text)
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)
+    text = re.sub(r"[~*]\[([^\]]*)\]\([^)]*\)", r"\1", text)   # ~[视频] / *[文件] 只留标题
     text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.M)
     text = re.sub(r"^\s*>\s?", "", text, flags=re.M)
