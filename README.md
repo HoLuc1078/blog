@@ -28,10 +28,13 @@ python app.py                     # 监听 0.0.0.0:8848（debug 默认关，DEBU
 
 ## 图标
 
-- `templates/icons.html` 内联 sprite 里是 **27 个本地自绘图标**：24 个水果（`icon-caomei` … `icon-shizi`）+ `icon-sakura` / `icon-rainbow` / `icon-clover`，在编辑页图标选择器里排最前。
-- 其余 **380 个** `ic-*` 来自 `static/icons.svg`（iconfont sprite）：选择器直接 `<use href="/static/icons.svg#ic-x">` 引用，整份只拉一次、之后走缓存；文章页 / 首页 / 草稿箱只把本页用到的 `<symbol>` 内联（`post_icon_sprites()`），不为一个图标去拉整份文件。
-- 没选图标、或图标名已失效的文章统一显示 `icon-sakura`（`DEFAULT_ICON`），不再按文章 id 分配。
-- `icon-sun` / `icon-eye` / `icon-moon` / `icon-pen` / `icon-close` 只给界面用，不进选择器。
+- **站内 27 个**（`static/icons-local.svg`）：24 个水果（`icon-caomei` … `icon-shizi`）+ `icon-sakura` / `icon-rainbow` / `icon-clover`，在编辑页图标选择器里排最前。
+  其中 19 个取自 [Twemoji](https://github.com/jdecked/twemoji)（**CC-BY 4.0**，© Twitter, Inc. and other contributors）；
+  火龙果 / 荔枝 / 榴莲 / 龙眼 / 山竹 / 石榴 / 西梅 / 柿子这 8 个没有对应 emoji，按同一画风自绘。**再分发时请保留这份署名。**
+- **其余 380 个** `ic-*` 来自 `static/icons.svg`（iconfont sprite）。
+- 这两套都是**按需引用**：编辑器图标选择器直接 `<use href="/static/icons-local.svg#名字">` / `/static/icons.svg#名字`（各只拉一次，之后走缓存）；文章页 / 首页 / 草稿箱只把本页真正用到的那一两个 `<symbol>` 内联进 HTML（`post_icon_sprites()`），既不额外拉整份 sprite，也不会把 27 个水果全塞进每个页面。
+- 没选图标、或图标名已失效的文章统一显示 `icon-sakura`（`DEFAULT_ICON`）。
+- `templates/icons.html` 里只剩 5 个**界面图标**：`icon-sun` / `icon-eye` / `icon-moon` / `icon-pen` / `icon-close`，它们随每个页面内联，可以直接 `<use href="#名字">`。界面上一律用 SVG，不用 emoji。
 
 ## 数据与升级
 

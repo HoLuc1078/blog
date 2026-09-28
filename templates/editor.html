@@ -46,18 +46,34 @@
         <button type="button" class="tab-btn" data-tab="preview">预览</button>
       </div>
 
-      <!-- 附件工具条：上传（仅站长）/ 快捷插入扩展语法；粘贴或拖入图片会自动上传 -->
+      {# 附件工具条：只有站长看得到（编辑页本身也只有站长进得来，这里再显式收一道）。
+         图标一律内联 SVG，不用 emoji。 #}
+      {% if is_owner %}
       <div class="ed-tools" id="edTools">
-        <button type="button" class="ed-tool" id="edToolUpload">上传附件</button>
-        <button type="button" class="ed-tool" id="edToolImage">插入图片</button>
-        <button type="button" class="ed-tool" id="edToolVideo">插入视频</button>
-        <button type="button" class="ed-tool" id="edToolFile">插入文件</button>
-        <button type="button" class="ed-tool" id="edToolCharge">评论解锁</button>
-        <span class="ed-tool-sep"></span>
-        <span class="ed-tool-state" id="edToolState"></span>
+        <button type="button" class="ed-tool" id="edToolUpload" title="上传附件（图片 / 视频 / 文档）">
+          <svg class="ed-tool-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.6v10.2"/><path d="M8.1 7.5 12 3.6l3.9 3.9"/><path d="M4.6 14.6v3a2.4 2.4 0 0 0 2.4 2.4h10a2.4 2.4 0 0 0 2.4-2.4v-3"/></svg>
+          <span>上传</span>
+        </button>
+        <button type="button" class="ed-tool" id="edToolImage" title="插入图片 ![](地址)">
+          <svg class="ed-tool-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.2" y="4.8" width="17.6" height="14.4" rx="2"/><circle cx="8.7" cy="9.7" r="1.7"/><path d="M4.2 17.4 9 13l3.5 3.3L15.6 13l4.4 4.1"/></svg>
+          <span>图片</span>
+        </button>
+        <button type="button" class="ed-tool" id="edToolVideo" title="插入视频 ~[标题](地址)">
+          <svg class="ed-tool-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.2" y="4.8" width="17.6" height="14.4" rx="2"/><path d="M10.3 9.2 16 12l-5.7 2.8z" fill="currentColor" stroke="none"/></svg>
+          <span>视频</span>
+        </button>
+        <button type="button" class="ed-tool" id="edToolFile" title="插入文件卡片 *[文件名](地址)">
+          <svg class="ed-tool-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.4 3.6h7l4.2 4.2v12.6H6.4z"/><path d="M13.3 3.6v4.3h4.3"/></svg>
+          <span>文件</span>
+        </button>
+        <button type="button" class="ed-tool" id="edToolCharge" title="包一层 :::charge 评论解锁">
+          <svg class="ed-tool-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="4.8" y="10.3" width="14.4" height="9.3" rx="1.8"/><path d="M8.4 10.3V7.6a3.6 3.6 0 0 1 7.2 0v2.7"/></svg>
+          <span>解锁</span>
+        </button>
       </div>
       <input type="file" id="edFileInput" hidden multiple
              accept="image/*,video/*,audio/*,.pdf,.zip,.7z,.rar,.gz,.tar,.txt,.md,.csv,.json,.log,.py,.c,.h,.cpp,.hpp,.java,.pas,.tex,.doc,.docx,.xls,.xlsx,.ppt,.pptx">
+      {% endif %}
 
       <textarea id="edContent" class="ed-content" spellcheck="false"
                 placeholder="正文（可直接把图片粘贴进来，会自动上传并插入 Markdown）">{% if post %}{{ post.content_md }}{% endif %}</textarea>
@@ -132,11 +148,10 @@
       <div class="glass side-card">
         <h4 class="side-title">扩展语法</h4>
         <div class="ed-help">
-          <p><code>![说明](地址)</code> 图片：按屏幕缩放，点一下可放大看原图。</p>
-          <p><code>~[标题](地址)</code> 视频：B 站 / YouTube 链接自动转内嵌播放器，<code>.mp4</code> 等直链用原生播放器。</p>
-          <p><code>*[文件名](地址)</code> 文件：渲染成下载卡片，点击即下载。</p>
-          <p><code>:::</code> <code>charge[标题]</code> ＋ 正文 ＋ <code>:::</code> 评论解锁：没在本页评论过的访客看不到里面的内容。</p>
-          <p class="dim">粘贴或拖入图片会自动上传；上传后这里会给出 Markdown 与直链。</p>
+          <p><code>![说明](地址)</code> 图片</p>
+          <p><code>~[标题](地址)</code> 视频</p>
+          <p><code>*[文件名](地址)</code> 文件</p>
+          <p><code>charge[标题]</code> … <code>:::</code> 评论解锁</p>
         </div>
       </div>
 

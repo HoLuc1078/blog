@@ -70,8 +70,9 @@ On_server/           服务器上那份数据库及其备份（**不进版本库
 templates/           Jinja2 模板（服务端渲染；除 editor.html 外都 extends base.html）
   base.html          全站骨架：<head>、主题预设脚本、图标 sprite、花瓣 canvas、顶栏
                      （主题三档切换 + 草稿箱 / 写文章）、toast 容器、公共脚本引入。
-  icons.html         内联 sprite：27 个本地自绘图标（24 水果 + 樱花/彩虹/四叶草），
+  icons.html         内联 sprite：**只剩 5 个界面图标**（icon-sun / eye / moon / pen / close），
                      每个页面都 include，所以这些图标可以直接 <use href="#名字">。
+                     文章标题用的那 27 个已经搬到 static/icons-local.svg（见下）。
   index.html         首页：过滤条（不安全 / 负能量 / 非学术 + 标签 chips）、文章卡片列表、
                      空状态、底部翻页 + 「每页 N 篇」数字输入框（**可手输，1–200，没有"全部"**）。
   article.html       文章页：标题 / 图标 / 元信息 / 正文（md 渲染）/ 评论区（多级回复、
@@ -98,6 +99,10 @@ static/
                      图标搜索与随机、置顶量、发布时间、过滤标记、本地草稿、提交前校验。
   icons.svg          iconfont sprite：380 个 ic-* 图标（约 800KB）。编辑器图标选择器直接
                      <use href="/static/icons.svg#ic-x">；文章页只内联用到的那几个 <symbol>。
+  icons-local.svg   站内那 27 个图标（24 水果 + 樱花 / 彩虹 / 四叶草，约 33KB）。
+                     19 个取自 Twemoji（CC-BY 4.0，README 里有署名，别删）；
+                     火龙果/荔枝/榴莲/龙眼/山竹/石榴/西梅/柿子 8 个没有对应 emoji，同画风自绘。
+                     viewBox 统一 0 0 36 36，只含 <symbol>，不放 <script> / 事件属性。
   bg.jpg             背景图（同时是 THEME_FROM_BG 取色来源）。
   avatar.png         博主头像：**固定就这一个文件**，上传即覆盖，不存路径。
   favicon.svg        站点图标 + 顶栏 logo（favicon-dark.svg 是暗色主题的蓝色版）。
@@ -133,9 +138,12 @@ uploads/             站长上传的附件（YYYY/MM/<16 位随机名>.<ext>，*
    （`data-pin`，可为 0 / 负数）每篇都显示。
    「每页 N 篇」是数字输入框，范围 1–200，**没有"全部"这一档**；越界由 `clampPer()` 夹紧。
 3. **草稿对游客彻底隐身**：`status='draft'` 的文章游客打开链接直接 404，且不进任何列表 / 统计。
-4. **图标分两套**：本地自绘的 27 个（`LOCAL_ICONS`，定义在 `templates/icons.html`，用 `#名字` 引用）
-   与 `static/icons.svg` 里的 380 个 ic-*（用 `/static/icons.svg#名字` 引用）。
-   取值统一走 `post_icon()` / `post_icon_ref()`，需要内联时用 `post_icon_sprites()`，**别手写 <use href>**。
+4. **图标分三处，取值统一走函数，别手写 `<use href>`**：
+   - `static/icons-local.svg`：站内 27 个（`LOCAL_ICONS`，选择器里排最前）→ `/static/icons-local.svg#名字`
+   - `static/icons.svg`：380 个 iconfont `ic-*` → `/static/icons.svg#名字`
+   - `templates/icons.html`：只剩 5 个界面图标，随页面内联 → `#名字`
+   一律用 `post_icon()` 取名字、`post_icon_ref()` 取引用地址、`post_icon_sprites()` 内联本页用到的
+   （前两处**不**随每个页面下发；27 个水果要是又内联回去，每个页面白白多背 33KB）。
 5. **正文与评论渲染分开**：正文 `{{ text | md | safe }}`，评论用 `| md_comment`（严格净化：
    禁站外图片、强制 `rel`、收紧 class）。渲染结果都经过 `md_math.sanitize()` 白名单，别绕过。
 6. **权限只有一个开关**：`session["owner"]`（`owner_unlocked()`）。写操作 / 接口入口一律
@@ -185,7 +193,7 @@ uploads/             站长上传的附件（YYYY/MM/<16 位随机名>.<ext>，*
 | 改首页卡片、过滤条、翻页区 | `templates/index.html` + `static/js/index.js` + `static/css/style.css` |
 | 改编辑器界面与交互 | `templates/editor.html` + `static/js/editor.js` |
 | 改配色 / 主题档位 | `static/css/style.css` 的 CSS 变量；想让主色跟着背景图走则开 `THEME_FROM_BG=1` |
-| 加图标 | 本地自绘的加进 `templates/icons.html` + `app.py` 的 `LOCAL_ICONS`；iconfont 的丢进 `static/icons.svg`（自动识别） |
+| 加图标 | 站内那 27 个加进 `static/icons-local.svg` + `app.py` 的 `LOCAL_ICONS`；iconfont 的丢进 `static/icons.svg`；纯界面图标放 `templates/icons.html`（三处都自动识别，按 mtime 缓存） |
 | 改站点文案 / 昵称 / 链接的默认值 | `app.py` 的 `load_cfg()` 与 `templates/author_col.html` |
 | 加 / 改扩展语法（视频、文件卡片、`:::charge` 之类） | `md_math.py`：行内指令加在 `_substitute_media` 那一套里，容器加在 `_render_container`；**新占一段私有代理字符**（第 5 节第 15 条），并同步 README 的语法清单 |
 | 改图片缩放 / 灯箱 | `static/css/style.css` 的 `.md-body img` 与 `.img-zoom*` + `static/js/app.js` 的 `bindImageZoom()` |

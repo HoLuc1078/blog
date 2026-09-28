@@ -368,9 +368,8 @@
 
   /* ---------- 附件上传（仅站长）：粘贴 / 拖入图片会自动上传并插入 Markdown ---------- */
   var uploadsEl = $("edUploads");
-  var toolStateEl = $("edToolState");
   var fileInputEl = $("edFileInput");
-  var uploadBusy = 0;
+  var uploading = 0;
 
   function csrf() {
     var m = document.querySelector('meta[name="csrf-token"]');
@@ -413,9 +412,10 @@
     onInput();
   }
 
-  function setToolState() {
-    if (!toolStateEl) return;
-    toolStateEl.textContent = uploadBusy ? "正在上传 " + uploadBusy + " 个文件…" : "";
+  /* 上传中只把按钮置灰，不再写一行动态说明（站长自己就是开发者） */
+  function setUploading() {
+    var b = $("edToolUpload");
+    if (b) b.disabled = uploading > 0;
   }
 
   function addUploadItem(f) {
@@ -468,8 +468,8 @@
     for (var i = 0; i < files.length; i++) {
       fd.append("file", files[i], files[i].name || ("paste-" + Date.now() + ".png"));
     }
-    uploadBusy++;
-    setToolState();
+    uploading++;
+    setUploading();
     fetch("/api/upload", {
       method: "POST",
       credentials: "same-origin",
@@ -478,8 +478,8 @@
     }).then(function (res) {
       return res.json().catch(function () { return {}; });
     }).then(function (j) {
-      uploadBusy--;
-      setToolState();
+      uploading--;
+      setUploading();
       if (!j.ok || !j.files || !j.files.length) {
         if (j.need_owner) { toast("站长口令未解锁", "err"); return; }
         toast(j.error || "上传失败", "err");
@@ -489,10 +489,10 @@
       if (autoInsert) {
         insertTemplate(j.files.map(function (f) { return f.markdown; }).join("\n") + "\n");
       }
-      toast("已上传 " + j.files.length + " 个文件", "ok");
+      /* 上传成功不弹提示：结果就在下面的列表里，站长不需要再被告知一遍 */
     }).catch(function () {
-      uploadBusy--;
-      setToolState();
+      uploading--;
+      setUploading();
       toast("网络错误，上传失败", "err");
     });
   }

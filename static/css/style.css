@@ -164,6 +164,12 @@ a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .btn.big { width: 100%; padding: 11px; font-size: 15px; }
 .full-btn { width: 100%; margin-top: 10px; }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
+/* 按钮里的内联 svg 箭头（界面一律用 svg，不用 emoji / 装饰字符） */
+.btn-ico {
+  width: 15px; height: 15px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 1.9;
+  stroke-linecap: round; stroke-linejoin: round;
+}
 
 input[type="text"], input[type="email"], input[type="password"], input[type="number"],
 input[type="datetime-local"], textarea, select {
@@ -194,10 +200,22 @@ form.inline-form { display: inline-block; margin: 0; }
   flex: 3 1 0; min-width: 0;
   display: flex; flex-direction: column; gap: 12px;
   padding: 14px 0 26px;
-  /* 这里**不能**用 opacity 做整体淡出：opacity 会把整棵子树合成一层再统一压透明，
-     子元素没法「自己调回 1」，正文里的图片会跟着一起发灰、看不清。
-     淡出感交给面板底色与墨色自己带（--glass / .md-body 的颜色）。 */
 }
+/* 主栏整体要保持原来的那档「淡」（= 0.75），但**不能**写成 .main-col { opacity: .75 }：
+   opacity 会把整棵子树先合成一层再统一压透明，子元素没法「自己调回 1」，
+   正文里的 markdown 图片和 :::info 这类卡片会跟着一起发灰、看不清。
+   改成把 0.75 落到主栏里各元素**自己的颜色**上：color-mix 只缩 alpha，
+   数学上与原来的分组透明等价（面板叠在页背景上时两者结果完全一致），
+   而图片和 md-block 不受影响，照旧实色。 */
+.main-col .glass {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--glass-hi) 75%, transparent),
+    color-mix(in srgb, var(--glass-lo) 75%, transparent));
+}
+.main-col .latest-board { background: color-mix(in srgb, var(--solid-board) 75%, transparent); }
+.main-col .post-card,
+.main-col .empty-card { background: color-mix(in srgb, var(--solid-card) 75%, transparent); }
+.main-col .post-card:hover { background: color-mix(in srgb, var(--card-hover) 75%, transparent); }
 /* 作者栏：纯色实心长方形、无圆角、固定高度吸顶；只有内部列表各自滚动 */
 .author-col {
   flex: 0 0 286px; width: 286px; max-width: 286px; min-width: 0;
@@ -425,8 +443,14 @@ form.inline-form { display: inline-block; margin: 0; }
 .md-body h2 { font-size: 20px; border-left: 4px solid var(--accent); padding-left: 10px; }
 .md-body h3 { font-size: 17px; }
 .md-body h4 { font-size: 15px; }
-/* 主栏以前整体压 75% 透明，正文墨色是特意加深来抵消它的；现在不压了，
-   直接用上面那套原色即可（作者栏本来也在用它）。 */
+/* 主栏里墨色也照旧按 0.75 反推（上面那几条规则把面板压淡了，文字得跟着淡，
+   两边才不会一边透明一边实心）。作者栏不在主栏里，用上面那套原色即可。 */
+.main-col .md-body { color: color-mix(in srgb, #33243a 75%, transparent); }
+.main-col .md-body h1, .main-col .md-body h2,
+.main-col .md-body h3, .main-col .md-body h4 { color: color-mix(in srgb, #2f1f2b 75%, transparent); }
+.main-col .art-title { color: color-mix(in srgb, #46323f 75%, transparent); }
+.main-col .art-summary { background: color-mix(in srgb, #fff7fb 75%, transparent); }
+.main-col .post-title, .main-col .panel-title { color: color-mix(in srgb, #4d3b52 75%, transparent); }
 .md-body a { color: var(--accent-deep); text-decoration: underline; text-underline-offset: 3px; }
 .md-body code {
   background: var(--code-bg); color: #b1678c; padding: 2px 6px; border-radius: var(--r-xs);
@@ -474,12 +498,13 @@ form.inline-form { display: inline-block; margin: 0; }
   border-radius: 0;
   background: #fff8fc;
 }
+/* 容器卡片整体实色：站长要求 :::info 这类卡片不要透明度，标题条也跟着用实色 */
 .md-body .md-block-head {
   display: flex; align-items: center; gap: 10px;
   padding: 7px 12px; font-size: 13px; font-weight: 800; letter-spacing: 1px;
   color: var(--acc);
   border-bottom: 1px solid var(--border-soft);
-  background: rgba(255, 255, 255, 0.7);
+  background: color-mix(in srgb, var(--acc) 8%, #fff);
 }
 .md-body .md-block-caret { margin-left: auto; font-size: 11px; color: var(--dim); }
 .md-body .md-block-body { padding: 10px 14px 12px; }
@@ -1174,8 +1199,8 @@ html[data-theme="dark"] .md-body pre code { color: #d6dee3; }
 html[data-theme="dark"] .md-body blockquote { background: rgba(255, 255, 255, .05); color: var(--dim); }
 html[data-theme="dark"] .md-body th { background: #2a343b; color: #eaf0f3; }
 html[data-theme="dark"] .md-body th, html[data-theme="dark"] .md-body td { border-color: var(--border-soft); }
-html[data-theme="dark"] .md-body .md-block { background: rgba(255, 255, 255, .04); }
-html[data-theme="dark"] .md-body .md-block-head { background: rgba(255, 255, 255, .06); }
+html[data-theme="dark"] .md-body .md-block { background: #242e35; }
+html[data-theme="dark"] .md-body .md-block-head { background: color-mix(in srgb, var(--acc) 16%, #2b353d); }
 html[data-theme="dark"] .md-code-copy { background: rgba(255, 255, 255, .12); color: #9cc3ec; }
 html[data-theme="dark"] .toast { background: rgba(38, 48, 55, .97); color: #eaf0f3; }
 html[data-theme="dark"] .cmt-err,
@@ -1360,6 +1385,7 @@ html[data-theme="dark"] .md-body .md-charge { background: rgba(255, 255, 255, .0
   background: rgba(255, 255, 255, .05);
 }
 .ed-tools .ed-tool {
+  display: inline-flex; align-items: center; gap: 5px;
   cursor: pointer; font: inherit; font-size: 12.5px; line-height: 1.4;
   padding: 4px 11px; color: var(--ed-ink);
   background: rgba(255, 255, 255, .08);
@@ -1367,8 +1393,12 @@ html[data-theme="dark"] .md-body .md-charge { background: rgba(255, 255, 255, .0
 }
 .ed-tools .ed-tool:hover { background: rgba(255, 255, 255, .18); }
 .ed-tools .ed-tool:disabled { opacity: .5; cursor: default; }
-.ed-tools .ed-tool-sep { flex: 1 1 auto; }
-.ed-tools .ed-tool-state { font-size: 12px; color: var(--ed-dim); }
+/* 工具条图标：内联 SVG（不用 emoji），统一 14px 线性风格 */
+.ed-tool-ico {
+  width: 14px; height: 14px; flex: 0 0 auto;
+  fill: none; stroke: currentColor; stroke-width: 1.7;
+  stroke-linecap: round; stroke-linejoin: round;
+}
 .ed-uploads { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .ed-uploads:empty { display: none; }
 .ed-up-item {

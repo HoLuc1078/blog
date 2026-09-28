@@ -111,11 +111,13 @@ ST_PUBLISHED = "published"
 ST_DRAFT = "draft"
 
 # 文章标题前的 svg 图标（洛谷式的 <svg class="icon"><use href="#…"></use></svg>）
-#   · LOCAL_ICONS：站内自绘、定义在 templates/icons.html、随每个页面内联的一组
-#     （24 个水果 + 樱花 / 彩虹 / 四叶草），在图标选择器里排最前；
-#   · 其余 380 个来自 static/icons.svg —— yc-lain 博客那套 iconfont（ic- 前缀），
-#     编辑器选择器直接 <use href="/static/icons.svg#ic-x"> 引用，
-#     文章页只把用到的那一两个 <symbol> 内联进页面（见 post_icon_sprites）。
+#   · static/icons-local.svg：站内这 27 个（24 个水果 + 樱花 / 彩虹 / 四叶草），
+#     在图标选择器里排最前。换高清重绘后体积上去了，就从 templates/icons.html 里
+#     挪了出来 —— 那 21KB 原来是要随**每个页面**下发的；现在只有真正用到的
+#     那一两个 <symbol> 会被内联进文章页 / 首页（见 post_icon_sprites）。
+#   · static/icons.svg：yc-lain 博客那套 iconfont（380 个 ic- 前缀）。
+#   · templates/icons.html 里只剩 icon-sun / eye / moon / pen / close 这 5 个界面图标，
+#     它们随每个页面内联，所以能直接 <use href="#icon-sun">。
 FRUIT_ICONS = [
     "icon-caomei", "icon-boluo", "icon-huolongguo", "icon-chengzi", "icon-hamigua",
     "icon-lizhi", "icon-mangguo", "icon-liulian", "icon-lizi", "icon-lanmei",
@@ -126,7 +128,10 @@ FRUIT_ICONS = [
 LOCAL_ICONS = FRUIT_ICONS + ["icon-sakura", "icon-rainbow", "icon-clover"]
 DEFAULT_ICON = "icon-sakura"        # 没选图标的文章统一显示它
 ICON_SPRITE = os.path.join(BASE_DIR, "static", "icons.svg")
-_ICON_CACHE = {"mtime": None, "map": {}, "names": ()}
+LOCAL_ICON_SPRITE = os.path.join(BASE_DIR, "static", "icons-local.svg")
+ICON_URL = "/static/icons.svg"
+LOCAL_ICON_URL = "/static/icons-local.svg"
+_ICON_CACHE = {}          # 文件路径 -> (mtime, {名字: <symbol> 片段})
 _SYMBOL_RE = re.compile(r'<symbol\b[^>]*\bid="([^"]+)"[^>]*>.*?</symbol>', re.S)
 
 # ----------------------------------------------------------------------
@@ -365,27 +370,40 @@ def _parse_links(raw):
     return clean_links(data)[0]
 
 
-def _icon_sprite():
-    """static/icons.svg 里的全部 <symbol>：{名字: 片段}（按 mtime 自动重载）。"""
+def _read_sprite(path):
+    """读一个 sprite 文件里的全部 <symbol>：{名字: 片段}（按 mtime 自动重载）。"""
     try:
-        mtime = os.path.getmtime(ICON_SPRITE)
+        mtime = os.path.getmtime(path)
     except OSError:
-        return _ICON_CACHE["map"]
-    if _ICON_CACHE["mtime"] != mtime:
-        try:
-            with open(ICON_SPRITE, "r", encoding="utf-8") as f:
-                text = f.read()
-        except OSError:
-            return _ICON_CACHE["map"]
-        found = {}
-        for m in _SYMBOL_RE.finditer(text):
-            found.setdefault(m.group(1), m.group(0))
-        _ICON_CACHE.update(mtime=mtime, map=found, names=tuple(found))
-    return _ICON_CACHE["map"]
+        return {}
+    cached = _ICON_CACHE.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return cached[1] if cached else {}
+    found = {}
+    for m in _SYMBOL_RE.finditer(text):
+        found.setdefault(m.group(1), m.group(0))
+    _ICON_CACHE[path] = (mtime, found)
+    return found
+
+
+def _local_sprite():
+    return _read_sprite(LOCAL_ICON_SPRITE)
+
+
+def _icon_sprite():
+    """两套外部图标合并后的表（同名时本地那份优先）。"""
+    merged = dict(_read_sprite(ICON_SPRITE))
+    merged.update(_local_sprite())
+    return merged
 
 
 def post_icons():
-    """图标选择器里的全部图标：本地自绘的 27 个排前面，后面是 iconfont 那整套。"""
+    """图标选择器里的全部图标：站内那 27 个排前面，后面是 iconfont 那整套。"""
     sprite = _icon_sprite()
     return LOCAL_ICONS + [n for n in sprite if n not in LOCAL_ICONS]
 
@@ -414,23 +432,30 @@ def post_icon(post):
 
 
 def post_icon_ref(name):
-    """<use> 该指向哪里：本地自绘的在本页内联 sprite 里，iconfont 的在 static/icons.svg 里。"""
-    if name in LOCAL_ICONS or name not in _icon_sprite():
-        return "#" + name
-    return "/static/icons.svg#" + name
+    """<use> 该指向哪里。
+
+    站内 27 个 → static/icons-local.svg；iconfont → static/icons.svg；
+    剩下（icon-sun 等界面图标）在本页内联的 sprite 里，直接 #名字。
+    """
+    if name in _local_sprite():
+        return LOCAL_ICON_URL + "#" + name
+    if name in _read_sprite(ICON_SPRITE):
+        return ICON_URL + "#" + name
+    return "#" + name
 
 
 def post_icon_sprites(posts):
-    """把这一页用到的 iconfont 图标内联成 <symbol>（同名只出现一次）。
+    """把这一页用到的外部图标内联成 <symbol>（同名只出现一次）。
 
-    本地自绘的 27 个已经在 templates/icons.html 里了，这里跳过（否则 id 会重复）；
-    这样文章页为了图标不需要额外拉 700KB 的 sprite。
+    这样文章页 / 首页为了标题图标既不必额外拉整份 sprite（icons-local 33KB +
+    iconfont 800KB），也不会把 27 个水果全塞进每个页面 —— 用到哪个内联哪个。
+    界面图标（icon-sun 等）本来就在 templates/icons.html 里，不在这两套里，会跳过。
     """
     sprite = _icon_sprite()
     need, seen = [], set()
     for p in posts or []:
         name = post_icon(p)
-        if name in seen or name in LOCAL_ICONS or name not in sprite:
+        if name in seen or name not in sprite:
             continue
         seen.add(name)
         need.append(sprite[name])
